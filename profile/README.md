@@ -18,6 +18,7 @@ Here's a guide to our GitHub organization:
     [templates](https://github.com/orgs/marimo-team/repositories?q=template%3Atrue+archived%3Afalse)
     to get started with [publishing to GitHub pages](https://github.com/marimo-team/marimo-gh-pages-template), organizing projects [with `uv`](https://github.com/marimo-team/marimo-uv-starter-template),
     and more.
--   📚 Browse [example notebooks](https://github.com/marimo-team/examples) for
+-   🚀 Use [example notebooks](https://github.com/marimo-team/examples) as
     starting points for your own explorations, experiments, and tools.
+-   📚 [Learn fundamental concepts](https://github.com/marimo-team/learn) in Python, machine learning, and more, using marimo notebooks.
 -   ✨ Get inspired by [awesome projects](https://github.com/marimo-team/awesome-marimo) from our [awesome community](https://github.com/marimo-team/spotlights).

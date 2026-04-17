@@ -4,5 +4,23 @@
     "config:best-practices",
     "security:openssf-scorecard",
     "group:allNonMajor"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 5am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["digest", "pinDigest"],
+      "groupName": "digest pins",
+      "groupSlug": "digest-pins",
+      "schedule": ["before 5am on the first day of the month"]
+    },
+    {
+      "matchManagers": ["pre-commit"],
+      "groupName": "pre-commit hooks",
+      "groupSlug": "pre-commit-hooks",
+      "schedule": ["before 5am on the first day of the month"]
+    }
   ]
 }

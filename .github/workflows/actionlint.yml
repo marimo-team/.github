@@ -12,7 +12,8 @@ permissions: {}
 jobs:
   lint:
     name: actionlint
-    runs-on: ubuntu-latest
+    # Org-managed GitHub-hosted runner with an allowlisted outbound IP.
+    runs-on: ubuntu-small
     timeout-minutes: 5
     permissions:
       contents: read

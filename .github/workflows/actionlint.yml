@@ -12,8 +12,8 @@ permissions: {}
 jobs:
   lint:
     name: actionlint
-    # Org-managed GitHub-hosted runner with an allowlisted outbound IP.
-    runs-on: ubuntu-small
+    # Honor each caller's approved runner pool; public and private pools differ.
+    runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
     timeout-minutes: 5
     permissions:
       contents: read

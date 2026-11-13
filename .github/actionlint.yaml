@@ -2,5 +2,6 @@
 self-hosted-runner:
   labels:
     - ubuntu-small
+    - ubuntu-p-small
 # Repositories define different variables. Do not enforce a shared allowlist.
 config-variables: null

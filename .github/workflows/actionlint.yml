@@ -6,6 +6,11 @@ on:
         description: Commit SHA in marimo-team/.github containing the shared config
         required: true
         type: string
+      allow-concurrency-queue:
+        description: Allow the GitHub concurrency.queue key unsupported by actionlint v1.7.12
+        required: false
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -39,4 +44,12 @@ jobs:
           tar -xzf actionlint.tar.gz actionlint
       - name: Lint workflows
         # No repository scripts are executed. ShellCheck checks embedded shell code.
-        run: '"$RUNNER_TEMP/actionlint" -color -config-file "$RUNNER_TEMP/actionlint.yaml" -pyflakes=""'
+        env:
+          ALLOW_CONCURRENCY_QUEUE: ${{ inputs.allow-concurrency-queue }}
+        run: |
+          args=(-color -config-file "$RUNNER_TEMP/actionlint.yaml" -pyflakes="")
+          if [[ "$ALLOW_CONCURRENCY_QUEUE" == 'true' ]]; then
+            # Remove this compatibility exception when upstream supports concurrency.queue.
+            args+=(-ignore '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$')
+          fi
+          "$RUNNER_TEMP/actionlint" "${args[@]}"

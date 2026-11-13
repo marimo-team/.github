@@ -1,0 +1,6 @@
+# Shared policy for marimo-team workflows. Add custom runner labels here.
+self-hosted-runner:
+  labels:
+    - ubuntu-small
+# Repositories define different variables. Do not enforce a shared allowlist.
+config-variables: null

@@ -6,15 +6,15 @@ import {
   warning,
 } from "../src/actions.ts";
 import {
-  clearsEarlierBlocks,
   combineCi,
   evaluate,
   type PullState,
   reviewEvent,
+  supersededReviews,
 } from "../src/decide.ts";
 import { anchorFindings } from "../src/diff.ts";
 import { comparisonFileLimit, GitHubClient, GitHubError } from "../src/github.ts";
-import { findingComment, progressBody, reviewBody } from "../src/messages.ts";
+import { findingComment, progressBody, reviewBody, type RunInfo } from "../src/messages.ts";
 import { botLogin, resolvePolicy, reviewLabel } from "../src/policy.ts";
 import type { Parsed } from "../src/reader.ts";
 import { parseReviewResult, type ReviewResult } from "../src/result.ts";
@@ -49,39 +49,32 @@ async function readVerifiedResult(): Promise<{ result: ReviewResult; rejected: n
   return applyVerification(candidates, checks);
 }
 
-await runMain(async () => {
-  const repository = requireEnv("REPOSITORY");
-  const number = requirePositiveInteger("PR_NUMBER");
-  const baseSha = requireSha("BASE_SHA");
-  const commentId = requirePositiveInteger("COMMENT_ID");
-  const run = runInfoFromEnv();
+/** A 422 caused by an inline comment's position, rather than the body or the commit. */
+function isAnchoringError(error: unknown): boolean {
+  return error instanceof GitHubError && error.status === 422 &&
+    /pull_request_review_thread|\bline\b|\bpath\b|\bposition\b/i.test(error.detail);
+}
+
+interface Context {
+  readonly repository: string;
+  readonly number: number;
+  readonly baseSha: string;
+  readonly run: RunInfo;
+  readonly reader: GitHubClient;
+  readonly writer: GitHubClient;
+}
+
+/** Posts the review and returns the status for the progress comment. */
+async function publish({ repository, number, baseSha, run, reader, writer }: Context) {
   const policy = resolvePolicy(repository);
-  // Reads use the job's read-only token; only writes use the bot.
-  const reader = new GitHubClient(requireEnv("READ_TOKEN"), repository);
-  const writer = new GitHubClient(requireEnv("WRITE_TOKEN"), repository);
-
-  const finish = async (status: string) => {
-    await writer.updateComment(commentId, progressBody(run, status));
-    await writer.removeLabel(number, reviewLabel);
-  };
-
   if (requireEnv("REVIEW_JOB_RESULT") !== "success") {
-    await finish("The review failed before producing a result. See the run for details.");
-    return;
+    return "The review failed before producing a result. See the run for details.";
   }
   // Skipped when the reviewer had no findings to verify.
   if (!["success", "skipped"].includes(requireEnv("VERIFY_JOB_RESULT"))) {
-    await finish("Verifying the findings failed, so nothing was posted. See the run for details.");
-    return;
+    return "Verifying the findings failed, so nothing was posted. See the run for details.";
   }
-  let result: ReviewResult;
-  let rejected: number;
-  try {
-    ({ result, rejected } = await readVerifiedResult());
-  } catch (error) {
-    await finish("The agents' output couldn't be used. See the run for details.");
-    throw error;
-  }
+  const { result, rejected } = await readVerifiedResult();
 
   const [pull, comparison, checkRuns, status, earlierReviews] = await Promise.all([
     reader.pull(number),
@@ -91,8 +84,7 @@ await runMain(async () => {
     reader.reviews(number),
   ]);
   if (pull.state !== "open") {
-    await finish("The PR was closed before the review finished, so nothing was posted.");
-    return;
+    return "The PR was closed before the review finished, so nothing was posted.";
   }
 
   const files = comparison.files ?? [];
@@ -107,7 +99,11 @@ await runMain(async () => {
       changes: file.changes,
     })),
     filesTruncated: files.length >= comparisonFileLimit,
-    ci: combineCi(checkRuns, { state: status.state, totalCount: status.total_count }),
+    ci: combineCi(
+      checkRuns,
+      { state: status.state, totalCount: status.total_count },
+      requireEnv("GITHUB_RUN_ID"),
+    ),
   };
   const verdict = evaluate(result, run.headSha, state, policy);
   const event = reviewEvent(verdict, policy.authority);
@@ -146,7 +142,7 @@ await runMain(async () => {
       })),
     });
   const review = await submit().catch((error) => {
-    if (!(error instanceof GitHubError && error.status === 422 && inline.length)) throw error;
+    if (!(inline.length && isAnchoringError(error))) throw error;
     warning(
       `GitHub rejected the inline comments; posting them in the review body: ${error.message}`,
     );
@@ -155,24 +151,56 @@ await runMain(async () => {
     return submit();
   });
 
-  if (clearsEarlierBlocks(result, verdict, policy.authority)) {
-    const blocks = earlierReviews.filter((earlier) =>
-      earlier.user?.login === botLogin && earlier.state === "CHANGES_REQUESTED"
-    );
-    for (const block of blocks) {
-      try {
-        await writer.dismissReview(
-          number,
-          block.id,
-          `Superseded by a later review of ${run.headSha}.`,
-        );
-      } catch (error) {
-        warning(
-          `Could not dismiss review ${block.id}: ${error instanceof Error ? error.message : error}`,
-        );
-      }
+  const superseded = supersededReviews(
+    earlierReviews.filter((earlier) => earlier.user?.login === botLogin),
+    {
+      result,
+      verdict,
+      event,
+      authority: policy.authority,
+      reviewedHeadSha: run.headSha,
+      pull: state,
+    },
+  );
+  for (const id of superseded) {
+    try {
+      await writer.dismissReview(number, id, `Superseded by a later review of ${run.headSha}.`);
+    } catch (error) {
+      warning(`Could not dismiss review ${id}: ${error instanceof Error ? error.message : error}`);
     }
   }
+  return `Review posted: ${review.html_url}`;
+}
 
-  await finish(`Review posted: ${review.html_url}`);
+await runMain(async () => {
+  const repository = requireEnv("REPOSITORY");
+  const number = requirePositiveInteger("PR_NUMBER");
+  const commentId = requirePositiveInteger("COMMENT_ID");
+  const run = runInfoFromEnv();
+  // Reads use the job's read-only token; only writes use the bot.
+  const reader = new GitHubClient(requireEnv("READ_TOKEN"), repository);
+  const writer = new GitHubClient(requireEnv("WRITE_TOKEN"), repository);
+
+  const finish = async (status: string) => {
+    await writer.updateComment(commentId, progressBody(run, status));
+    await writer.removeLabel(number, reviewLabel);
+  };
+
+  let status: string;
+  try {
+    status = await publish({
+      repository,
+      number,
+      baseSha: requireSha("BASE_SHA"),
+      run,
+      reader,
+      writer,
+    });
+  } catch (error) {
+    await finish("The review couldn't be posted. See the run for details.").catch((cleanup) =>
+      warning(`Could not update the progress comment: ${cleanup}`)
+    );
+    throw error;
+  }
+  await finish(status);
 });

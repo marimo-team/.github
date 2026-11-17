@@ -13,18 +13,27 @@ export function isRelativeRepositoryPath(path: string): boolean {
 
 const instructionFileNames = ["AGENTS.md", "CLAUDE.md"] as const;
 
+export function isWithin(path: string, directory: string): boolean {
+  return path === directory || path.startsWith(`${directory}/`);
+}
+
 function depth(directory: string): number {
   return directory === "" ? 0 : directory.split("/").length;
 }
 
 /**
  * The instruction files that apply to a set of changed paths: those at the root and
- * in every ancestor directory of a changed file, shallowest first.
+ * in every ancestor directory of a changed file, shallowest first. `excluded` names
+ * workspace directories that aren't part of the base branch, such as the PR head.
  */
-export function instructionFileCandidates(changedPaths: Iterable<string>): string[] {
+export function instructionFileCandidates(
+  changedPaths: Iterable<string>,
+  excluded: readonly string[],
+): string[] {
   const directories = new Set<string>([""]);
   for (const path of changedPaths) {
     if (!isRelativeRepositoryPath(path)) continue;
+    if (excluded.some((directory) => isWithin(path, directory))) continue;
     const parents = path.split("/").slice(0, -1);
     for (let length = 1; length <= parents.length; length++) {
       directories.add(parents.slice(0, length).join("/"));

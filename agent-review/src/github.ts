@@ -4,7 +4,7 @@ import { repositoryRoles } from "./policy.ts";
 const apiUrl = "https://api.github.com";
 
 export class GitHubError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, readonly detail: string, message: string) {
     super(message);
   }
 }
@@ -53,6 +53,7 @@ export interface PullReview {
 export interface CheckRun {
   readonly status: string;
   readonly conclusion: string | null;
+  readonly details_url: string | null;
 }
 
 export interface CombinedStatus {
@@ -85,6 +86,7 @@ export class GitHubClient {
       const detail = (await response.text()).slice(0, 500);
       throw new GitHubError(
         response.status,
+        detail,
         `${method} ${path} failed (${response.status}): ${detail}`,
       );
     }
@@ -131,11 +133,13 @@ export class GitHubClient {
 
   async role(login: string): Promise<RepositoryRole> {
     try {
-      const { role_name } = await this.json<{ role_name: string }>(
+      const { role_name, permission } = await this.json<{ role_name: string; permission: string }>(
         "GET",
         `${this.repo}/collaborators/${encodeURIComponent(login)}/permission`,
       );
-      return repositoryRoles.find((role) => role === role_name) ?? "none";
+      // A custom role's name is its own; `permission` is the base role it inherits.
+      return repositoryRoles.find((role) => role === role_name) ??
+        repositoryRoles.find((role) => role === permission) ?? "none";
     } catch (error) {
       if (error instanceof GitHubError && error.status === 404) return "none";
       throw error;

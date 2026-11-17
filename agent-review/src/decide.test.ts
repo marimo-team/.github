@@ -1,10 +1,10 @@
 import { deepEqual as assertEquals } from "node:assert/strict";
 import {
-  clearsEarlierBlocks,
   combineCi,
   evaluate,
   type PullState,
   reviewEvent,
+  supersededReviews,
   type Verdict,
 } from "./decide.ts";
 import type { RepoPolicy } from "./policy.ts";
@@ -116,28 +116,63 @@ Deno.test("authority limits what a verdict can do on GitHub", () => {
   });
 });
 
-Deno.test("only a completed, non-blocking review clears earlier blocks", () => {
+Deno.test("withdraws earlier approvals and lifts blocks only after a full review of the head", () => {
+  const earlier = [{ id: 1, state: "APPROVED" }, { id: 2, state: "CHANGES_REQUESTED" }];
   const comment: Verdict = { kind: "comment", reasons: ["x"] };
-  assertEquals(clearsEarlierBlocks(clean, comment, "block"), true);
-  assertEquals(clearsEarlierBlocks({ ...clean, outcome: "incomplete" }, comment, "block"), false);
+  const base = {
+    result: clean,
+    verdict: comment,
+    event: "COMMENT" as const,
+    authority: "block" as const,
+    reviewedHeadSha: head,
+    pull: eligible,
+  };
+  assertEquals(supersededReviews(earlier, base), [1, 2]);
   assertEquals(
-    clearsEarlierBlocks(clean, { kind: "request_changes", blocking: [] }, "block"),
-    false,
+    supersededReviews(earlier, { ...base, event: "APPROVE", verdict: { kind: "approve" } }),
+    [2],
   );
-  assertEquals(clearsEarlierBlocks(clean, comment, "advisory"), false);
+  for (
+    const degraded of [
+      { result: { ...clean, outcome: "incomplete" as const } },
+      { result: { ...clean, limitations: ["Skipped a file."] } },
+      { pull: { ...eligible, filesTruncated: true } },
+      { pull: { ...eligible, headSha: "b".repeat(40) } },
+      { verdict: { kind: "request_changes" as const, blocking: [] } },
+      { authority: "advisory" as const },
+    ]
+  ) {
+    assertEquals(
+      supersededReviews(earlier, { ...base, ...degraded }),
+      [1],
+      JSON.stringify(degraded),
+    );
+  }
 });
 
 Deno.test("combines check runs and commit statuses", () => {
-  const done = (conclusion: string) => ({ status: "completed", conclusion });
+  const done = (conclusion: string) => ({ status: "completed", conclusion, details_url: null });
+  const running = { status: "in_progress", conclusion: null, details_url: null };
   const noStatus = { state: "pending", totalCount: 0 };
-  assertEquals(combineCi([], noStatus), "missing");
-  assertEquals(combineCi([done("success"), done("skipped")], noStatus), "success");
-  assertEquals(
-    combineCi([done("success"), { status: "in_progress", conclusion: null }], noStatus),
-    "pending",
-  );
-  assertEquals(combineCi([done("cancelled")], noStatus), "failure");
-  assertEquals(combineCi([done("success")], { state: "pending", totalCount: 1 }), "pending");
-  assertEquals(combineCi([], { state: "failure", totalCount: 1 }), "failure");
-  assertEquals(combineCi([], { state: "success", totalCount: 2 }), "success");
+  const ci = (runs: Parameters<typeof combineCi>[0], status = noStatus) =>
+    combineCi(runs, status, "7");
+  assertEquals(ci([]), "missing");
+  assertEquals(ci([done("success"), done("skipped")]), "success");
+  assertEquals(ci([done("success"), running]), "pending");
+  assertEquals(ci([done("cancelled")]), "failure");
+  assertEquals(ci([done("success")], { state: "pending", totalCount: 1 }), "pending");
+  assertEquals(ci([], { state: "failure", totalCount: 1 }), "failure");
+  assertEquals(ci([], { state: "success", totalCount: 2 }), "success");
+});
+
+Deno.test("ignores this run's own jobs when combining CI", () => {
+  const ownJob = {
+    status: "in_progress",
+    conclusion: null,
+    details_url: "https://github.com/o/r/actions/runs/7/job/9",
+  };
+  const otherRun = { ...ownJob, details_url: "https://github.com/o/r/actions/runs/70/job/9" };
+  const noStatus = { state: "pending", totalCount: 0 };
+  assertEquals(combineCi([ownJob], noStatus, "7"), "missing");
+  assertEquals(combineCi([ownJob, otherRun], noStatus, "7"), "pending");
 });

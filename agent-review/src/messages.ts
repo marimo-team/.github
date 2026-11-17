@@ -30,6 +30,9 @@ function attribution(run: RunInfo): string {
   return `> 🤖 Automated review by ${agent}, requested by \`${run.requester}\`.`;
 }
 
+// GitHub rejects review bodies over 65,536 characters.
+const maxBodyLength = 60_000;
+
 function footer(run: RunInfo): string {
   return `Reviewed \`${run.headSha}\` · [Run](${run.runUrl})`;
 }
@@ -94,8 +97,13 @@ export function reviewBody(options: {
       "No findings within the coverage above. This doesn't establish that the PR is correct.",
     );
   }
-  sections.push(footer(run));
-  return sections.join("\n\n");
+  const body = sections.join("\n\n");
+  if (body.length <= maxBodyLength) return `${body}\n\n${footer(run)}`;
+  return `${
+    body.slice(0, maxBodyLength)
+  }\n\n…\n\nThe review was too long to post in full. The run has the complete result.\n\n${
+    footer(run)
+  }`;
 }
 
 export function findingComment(finding: Finding): string {

@@ -140,7 +140,7 @@ await runMain(async () => {
   if (pass === "verify") await writeCandidates(`${workspace}/${contextDir}/candidates.json`);
 
   const projectFiles: string[] = [];
-  for (const candidate of instructionFileCandidates(changedPaths(files))) {
+  for (const candidate of instructionFileCandidates(changedPaths(files), [headDir, workDir])) {
     if (await isFile(`${workspace}/${candidate}`)) projectFiles.push(candidate);
   }
   const { template, schema } = passes[pass];

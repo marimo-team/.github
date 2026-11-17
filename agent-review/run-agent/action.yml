@@ -1,0 +1,68 @@
+name: Run review agent
+description: Runs Claude Code or Codex with read-only access and writes its structured output to a file.
+inputs:
+  harness:
+    description: claude or codex
+    required: true
+  model:
+    description: Model to run; the harness default when empty
+    required: false
+    default: ""
+  prompt:
+    description: The rendered prompt
+    required: true
+  claude-args:
+    description: Claude Code arguments, including the output schema
+    required: true
+  schema-file:
+    description: Output schema file, for Codex
+    required: true
+  output-file:
+    description: Where to write the agent's structured output
+    required: true
+  claude-code-oauth-token:
+    description: Claude Code credentials
+    required: false
+    default: ""
+  openai-api-key:
+    description: Codex credentials
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Run Claude Code
+      id: claude
+      if: inputs.harness == 'claude'
+      uses: anthropics/claude-code-action@cc98b3ae241b0fcfb6a42a2690751afffecb4452 # v1.0.278
+      env:
+        # Nested CLAUDE.md files under the PR head would otherwise load as instructions.
+        CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1"
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        # Without this the action exchanges the OIDC token for a Claude App token
+        # with write access.
+        github_token: ${{ github.token }}
+        prompt: ${{ inputs.prompt }}
+        claude_args: ${{ inputs.claude-args }}
+    - name: Save Claude output
+      if: inputs.harness == 'claude'
+      shell: bash
+      env:
+        STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+      run: printf '%s' "$STRUCTURED_OUTPUT" > "$OUTPUT_FILE"
+
+    # Codex drops sudo irreversibly and refuses to run again in the same job, so each
+    # pass that uses this action runs in its own job.
+    - name: Run Codex
+      if: inputs.harness == 'codex'
+      uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
+      with:
+        openai-api-key: ${{ inputs.openai-api-key }}
+        prompt: ${{ inputs.prompt }}
+        output-schema-file: ${{ inputs.schema-file }}
+        output-file: ${{ inputs.output-file }}
+        model: ${{ inputs.model }}
+        sandbox: read-only
+        safety-strategy: drop-sudo

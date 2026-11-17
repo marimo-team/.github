@@ -1,7 +1,8 @@
 # Agent review
 
-A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews it, and
-`marimo-oss-bot` posts the result as a PR review. Repositories call the reusable workflow in
+A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews it, a second run of
+the same agent checks each finding against the code, and `marimo-oss-bot` posts the confirmed
+findings as a PR review. Repositories call the reusable workflow in
 [`.github/workflows/agent-review.yml`](../.github/workflows/agent-review.yml).
 
 ## Trust boundaries
@@ -10,14 +11,16 @@ A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews
 | --------- | ------------------------------- | ----------------- | --------------------- |
 | `start`   | read; bot token for one comment | bot key           | none                  |
 | `review`  | read only                       | model credentials | the PR, via the agent |
+| `verify`  | read only                       | model credentials | the PR, via the agent |
 | `publish` | read; bot token for the review  | bot key           | the agent's output    |
 
 - The agent can only read files in the workspace. Claude Code gets `Read`, `Grep`, and `Glob` in
   `dontAsk` mode; Codex runs in its read-only sandbox.
 - The workspace root is the base branch. The PR head is checked out under `pr-head/` as files to
   read, and nothing executes it.
-- The review instructions come from [`prompt.md`](prompt.md) and the base branch's `REVIEW.md`. The
-  PR can't change the instructions it's reviewed under.
+- The instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`. The agent is
+  also pointed at the base branch's `AGENTS.md` and `CLAUDE.md` files for the changed paths. The PR
+  can't change the instructions it's reviewed under.
 - [`publish.ts`](steps/publish.ts) validates the agent's output and decides what to post using live
   PR state and [`policy.ts`](src/policy.ts). The agent can't choose the review event.
 

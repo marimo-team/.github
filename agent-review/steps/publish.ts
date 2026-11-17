@@ -16,19 +16,37 @@ import { anchorFindings } from "../src/diff.ts";
 import { comparisonFileLimit, GitHubClient, GitHubError } from "../src/github.ts";
 import { findingComment, progressBody, reviewBody } from "../src/messages.ts";
 import { botLogin, resolvePolicy, reviewLabel } from "../src/policy.ts";
+import type { Parsed } from "../src/reader.ts";
 import { parseReviewResult, type ReviewResult } from "../src/result.ts";
+import { applyVerification, parseVerification } from "../src/verification.ts";
 import { runInfoFromEnv } from "./run-info.ts";
 
-async function readResult(path: string): Promise<ReviewResult> {
+async function readOutput<T>(
+  agent: string,
+  path: string,
+  parse: (raw: string) => Parsed<T>,
+): Promise<T> {
   let raw: string;
   try {
     raw = await Deno.readTextFile(path);
   } catch {
-    throw new Error("The reviewer produced no result");
+    throw new Error(`The ${agent} produced no output`);
   }
-  const parsed = parseReviewResult(raw);
-  if (!parsed.ok) throw new Error(`The reviewer's result was invalid: ${parsed.errors.join("; ")}`);
-  return parsed.result;
+  const parsed = parse(raw);
+  if (!parsed.ok) throw new Error(`The ${agent}'s output was invalid: ${parsed.errors.join("; ")}`);
+  return parsed.value;
+}
+
+/** The review result with only the findings the verifier confirmed. */
+async function readVerifiedResult(): Promise<{ result: ReviewResult; rejected: number }> {
+  const candidates = await readOutput("reviewer", requireEnv("RESULT_PATH"), parseReviewResult);
+  if (candidates.findings.length === 0) return { result: candidates, rejected: 0 };
+  const checks = await readOutput(
+    "verifier",
+    requireEnv("VERIFICATION_PATH"),
+    (raw) => parseVerification(raw, candidates.findings.length),
+  );
+  return applyVerification(candidates, checks);
 }
 
 await runMain(async () => {
@@ -51,11 +69,17 @@ await runMain(async () => {
     await finish("The review failed before producing a result. See the run for details.");
     return;
   }
+  // Skipped when the reviewer had no findings to verify.
+  if (!["success", "skipped"].includes(requireEnv("VERIFY_JOB_RESULT"))) {
+    await finish("Verifying the findings failed, so nothing was posted. See the run for details.");
+    return;
+  }
   let result: ReviewResult;
+  let rejected: number;
   try {
-    result = await readResult(requireEnv("RESULT_PATH"));
+    ({ result, rejected } = await readVerifiedResult());
   } catch (error) {
-    await finish("The reviewer's output couldn't be used. See the run for details.");
+    await finish("The agents' output couldn't be used. See the run for details.");
     throw error;
   }
 
@@ -94,6 +118,9 @@ await runMain(async () => {
   }
   let { inline, unanchored } = anchorFindings(result.findings, patches);
   const notes: string[] = [];
+  if (rejected) {
+    notes.push(`Verification rejected ${rejected} candidate finding${rejected === 1 ? "" : "s"}.`);
+  }
   if (pull.head.sha !== run.headSha) {
     notes.push("Newer commits exist; this review doesn't cover them.");
   }

@@ -10,8 +10,8 @@ on:
 permissions: {}
 
 env:
-  # Each job's Doppler config holds only the credentials that job needs: the review
-  # job never sees the bot's private key, and the publish jobs never see model keys.
+  # Each job's Doppler config holds only the credentials that job needs: the agent
+  # jobs never see the bot's private key, and the publishing jobs never see model keys.
   DOPPLER_PROJECT: marimo-oss-bot
   DOPPLER_REVIEW_CONFIG: ci_review
   DOPPLER_REVIEW_IDENTITY: TODO-doppler-review-identity-id
@@ -105,9 +105,8 @@ jobs:
       contents: read
       pull-requests: read
       id-token: write # Doppler OIDC
-    env:
-      HARNESS: ${{ needs.start.outputs.harness }}
-      MODEL: ${{ needs.start.outputs.model }}
+    outputs:
+      findings: ${{ steps.check.outputs.findings }}
     steps:
       # The workspace root is the trusted base branch. The PR head is checked out
       # beside it only as files to read; no step in this workflow executes it.
@@ -132,12 +131,13 @@ jobs:
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
-      - name: Prepare review context
+      - name: Prepare review
         id: prepare
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:
+          PASS: review
           GITHUB_TOKEN: ${{ github.token }}
-          PROMPT_TEMPLATE: ${{ github.workspace }}/${{ env.CENTRAL_DIR }}/agent-review/prompt.md
+          MODEL: ${{ needs.start.outputs.model }}
         run: >-
           deno run --no-prompt --allow-net=api.github.com --allow-env
           --allow-read="$GITHUB_WORKSPACE" --allow-write="$GITHUB_WORKSPACE/$WORK_DIR,$GITHUB_OUTPUT"
@@ -150,39 +150,27 @@ jobs:
           doppler-identity-id: ${{ env.DOPPLER_REVIEW_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
           doppler-config: ${{ env.DOPPLER_REVIEW_CONFIG }}
-
-      - name: Review with Claude
-        id: claude
-        if: env.HARNESS == 'claude'
-        uses: anthropics/claude-code-action@cc98b3ae241b0fcfb6a42a2690751afffecb4452 # v1.0.278
-        env:
-          # Nested CLAUDE.md files under the PR head would otherwise load as instructions.
-          CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1"
+      # The checkout above is policy-ref. `$/` would avoid the checkout, but actionlint
+      # doesn't support it yet (rhysd/actionlint#711). A local path can't use env.
+      - name: Review
+        uses: ./_agent_review/central/agent-review/run-agent # zizmor: ignore[self-repository]
         with:
-          claude_code_oauth_token: ${{ steps.model-secrets.outputs.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Without this the action exchanges the OIDC token for a Claude App token
-          # with write access.
-          github_token: ${{ github.token }}
+          harness: ${{ needs.start.outputs.harness }}
+          model: ${{ needs.start.outputs.model }}
           prompt: ${{ steps.prepare.outputs.prompt }}
-          claude_args: ${{ steps.prepare.outputs.claude-args }}
-      - name: Save Claude result
-        if: env.HARNESS == 'claude'
-        env:
-          STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
-        run: printf '%s' "$STRUCTURED_OUTPUT" > "$WORK_DIR/result.json"
-
-      - name: Review with Codex
-        if: env.HARNESS == 'codex'
-        uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
-        with:
-          openai-api-key: ${{ steps.model-secrets.outputs.OPENAI_API_KEY }}
-          prompt-file: ${{ env.WORK_DIR }}/prompt.md
-          output-schema-file: ${{ env.WORK_DIR }}/result-schema.json
+          claude-args: ${{ steps.prepare.outputs.claude-args }}
+          schema-file: ${{ env.WORK_DIR }}/schema.json
           output-file: ${{ env.WORK_DIR }}/result.json
-          model: ${{ env.MODEL }}
-          sandbox: read-only
-          safety-strategy: drop-sudo
-
+          claude-code-oauth-token: ${{ steps.model-secrets.outputs.CLAUDE_CODE_OAUTH_TOKEN }}
+          openai-api-key: ${{ steps.model-secrets.outputs.OPENAI_API_KEY }}
+      - name: Check result
+        id: check
+        working-directory: ${{ env.CENTRAL_DIR }}/agent-review
+        env:
+          RESULT_PATH: ${{ github.workspace }}/${{ env.WORK_DIR }}/result.json
+        run: >-
+          deno run --no-prompt --allow-env --allow-read="$GITHUB_WORKSPACE"
+          --allow-write="$GITHUB_OUTPUT" steps/check-result.ts
       - name: Upload result
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -192,9 +180,89 @@ jobs:
           overwrite: true # a re-run attempt reuses the name
           retention-days: 7
 
+  # A second agent checks each finding against the code, so false positives are
+  # dropped before they can block a PR.
+  verify:
+    name: Verify findings
+    needs: [start, review]
+    if: needs.review.outputs.findings != '0'
+    runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write # Doppler OIDC
+    steps:
+      - name: Check out base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out PR head as review material
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: ${{ env.HEAD_DIR }}
+          persist-credentials: false
+      - name: Check out review code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: marimo-team/.github
+          ref: ${{ inputs.policy-ref }}
+          path: ${{ env.CENTRAL_DIR }}
+          sparse-checkout: agent-review
+          persist-credentials: false
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+      - name: Download review result
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-review-result
+          path: ${{ runner.temp }}/agent-review-result
+      - name: Prepare verification
+        id: prepare
+        working-directory: ${{ env.CENTRAL_DIR }}/agent-review
+        env:
+          PASS: verify
+          GITHUB_TOKEN: ${{ github.token }}
+          MODEL: ${{ needs.start.outputs.model }}
+          REVIEW_RESULT_PATH: ${{ runner.temp }}/agent-review-result/result.json
+        run: >-
+          deno run --no-prompt --allow-net=api.github.com --allow-env
+          --allow-read="$GITHUB_WORKSPACE,$RUNNER_TEMP"
+          --allow-write="$GITHUB_WORKSPACE/$WORK_DIR,$GITHUB_OUTPUT"
+          steps/prepare.ts
+      - name: Fetch model credentials
+        id: model-secrets
+        uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ env.DOPPLER_REVIEW_IDENTITY }}
+          doppler-project: ${{ env.DOPPLER_PROJECT }}
+          doppler-config: ${{ env.DOPPLER_REVIEW_CONFIG }}
+      - name: Verify
+        uses: ./_agent_review/central/agent-review/run-agent # zizmor: ignore[self-repository]
+        with:
+          harness: ${{ needs.start.outputs.harness }}
+          model: ${{ needs.start.outputs.model }}
+          prompt: ${{ steps.prepare.outputs.prompt }}
+          claude-args: ${{ steps.prepare.outputs.claude-args }}
+          schema-file: ${{ env.WORK_DIR }}/schema.json
+          output-file: ${{ env.WORK_DIR }}/verification.json
+          claude-code-oauth-token: ${{ steps.model-secrets.outputs.CLAUDE_CODE_OAUTH_TOKEN }}
+          openai-api-key: ${{ steps.model-secrets.outputs.OPENAI_API_KEY }}
+      - name: Upload verification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-review-verification
+          path: ${{ env.WORK_DIR }}/verification.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   publish:
     name: Publish
-    needs: [start, review]
+    needs: [start, review, verify]
     if: always() && needs.start.result == 'success'
     runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
     timeout-minutes: 5
@@ -222,6 +290,12 @@ jobs:
         with:
           name: agent-review-result
           path: ${{ runner.temp }}/agent-review-result
+      - name: Download verification
+        if: needs.verify.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: agent-review-verification
+          path: ${{ runner.temp }}/agent-review-verification
       - name: Fetch bot credentials
         id: bot-secrets
         uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
@@ -247,6 +321,8 @@ jobs:
           WRITE_TOKEN: ${{ steps.bot-token.outputs.token }}
           REVIEW_JOB_RESULT: ${{ needs.review.result }}
           RESULT_PATH: ${{ runner.temp }}/agent-review-result/result.json
+          VERIFY_JOB_RESULT: ${{ needs.verify.result }}
+          VERIFICATION_PATH: ${{ runner.temp }}/agent-review-verification/verification.json
           COMMENT_ID: ${{ needs.start.outputs.comment-id }}
           HARNESS: ${{ needs.start.outputs.harness }}
           MODEL: ${{ needs.start.outputs.model }}

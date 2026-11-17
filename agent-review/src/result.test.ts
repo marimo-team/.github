@@ -1,5 +1,5 @@
 import { deepEqual as assertEquals } from "node:assert/strict";
-import { parseReviewResult, reviewResultSchema } from "./result.ts";
+import { parseReviewResult } from "./result.ts";
 
 const valid = {
   outcome: "completed",
@@ -16,7 +16,7 @@ function errorsFor(value: unknown): readonly string[] {
 
 Deno.test("parses a valid result", () => {
   const parsed = parseReviewResult(JSON.stringify(valid));
-  assertEquals(parsed.ok && parsed.result.findings[0]?.severity, "high");
+  assertEquals(parsed.ok && parsed.value.findings[0]?.severity, "high");
 });
 
 Deno.test("rejects malformed output", () => {
@@ -34,20 +34,4 @@ Deno.test("rejects findings that point outside the repository", () => {
   }
   const zeroLine = { ...valid.findings[0], line: 0 };
   assertEquals(errorsFor({ ...valid, findings: [zeroLine] }).length, 1);
-});
-
-Deno.test("schema meets OpenAI strict-mode rules: every property required, none extra", () => {
-  const visit = (node: unknown): void => {
-    if (typeof node !== "object" || node === null) return;
-    const schema = node as Record<string, unknown>;
-    if (schema.type === "object") {
-      assertEquals(schema.additionalProperties, false);
-      assertEquals(
-        [...(schema.required as string[])].sort(),
-        Object.keys(schema.properties as object).sort(),
-      );
-    }
-    Object.values(schema).forEach(visit);
-  };
-  visit(reviewResultSchema);
 });

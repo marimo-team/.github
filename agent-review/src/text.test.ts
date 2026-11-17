@@ -11,12 +11,19 @@ const variables = {
   contextDir: "_agent_review/context",
 };
 
-Deno.test("renders prompt variables and appends repository guidance", () => {
-  const prompt = renderPrompt("Review #{{number}} in {{headDir}}.", variables, "Check the kernel.");
-  assertEquals(prompt.startsWith("Review #7 in pr-head."), true);
-  assertEquals(prompt.trimEnd().endsWith("Check the kernel."), true);
-  assertEquals(renderPrompt("x", variables, "  \n"), "x");
-  assertThrows(() => renderPrompt("{{missing}}", variables, undefined));
+const noInstructions = { reviewGuide: undefined, projectFiles: [] };
+
+Deno.test("renders prompt variables and appends repository instructions", () => {
+  const prompt = renderPrompt(["Review #{{number}}.", "Read {{headDir}}/."], variables, {
+    reviewGuide: "# Review instructions\n\nCheck the kernel.",
+    projectFiles: ["AGENTS.md", "marimo/_server/AGENTS.md"],
+  });
+  assertEquals(prompt.startsWith("Review #7.\n\nRead pr-head/."), true);
+  assertEquals(prompt.includes("- `marimo/_server/AGENTS.md`"), true);
+  assertEquals(prompt.indexOf("AGENTS.md") < prompt.indexOf("Check the kernel."), true);
+  assertEquals(prompt.trimEnd().endsWith("`REVIEW.md`:\n\nCheck the kernel."), true);
+  assertEquals(renderPrompt(["x"], variables, { ...noInstructions, reviewGuide: "  \n" }), "x\n");
+  assertThrows(() => renderPrompt(["{{missing}}"], variables, noInstructions));
 });
 
 Deno.test("sanitizes untrusted model markdown", () => {

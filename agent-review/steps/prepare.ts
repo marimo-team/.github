@@ -6,12 +6,27 @@ import {
   setOutput,
   warning,
 } from "../src/actions.ts";
-import { comparisonFileLimit, GitHubClient } from "../src/github.ts";
-import { claudeArgs, schemaJson } from "../src/harness.ts";
+import { type ComparedFile, comparisonFileLimit, GitHubClient } from "../src/github.ts";
+import { claudeArgs } from "../src/harness.ts";
+import { instructionFileCandidates } from "../src/paths.ts";
 import { botLogin } from "../src/policy.ts";
 import { renderPrompt } from "../src/prompt.ts";
+import { parseReviewResult, reviewResultSchema } from "../src/result.ts";
+import { verificationSchema } from "../src/verification.ts";
 
 const maxDiffBytes = 1_500_000;
+
+const passes = {
+  review: { template: "review.md", schema: reviewResultSchema },
+  verify: { template: "verify.md", schema: verificationSchema },
+} as const;
+type Pass = keyof typeof passes;
+
+function requirePass(): Pass {
+  const pass = requireEnv("PASS");
+  if (!(pass in passes)) throw new Error(`PASS must be one of ${Object.keys(passes).join(", ")}`);
+  return pass as Pass;
+}
 
 async function readOptional(path: string): Promise<string | undefined> {
   try {
@@ -22,7 +37,35 @@ async function readOptional(path: string): Promise<string | undefined> {
   }
 }
 
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await Deno.stat(path)).isFile;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+}
+
+function readTemplate(name: string): Promise<string> {
+  return Deno.readTextFile(new URL(`../prompts/${name}`, import.meta.url));
+}
+
+function changedPaths(files: readonly ComparedFile[]): string[] {
+  return files.flatMap((file) =>
+    file.previous_filename ? [file.filename, file.previous_filename] : [file.filename]
+  );
+}
+
+/** Numbers the reviewer's findings so the verifier can answer for each one. */
+async function writeCandidates(path: string): Promise<void> {
+  const parsed = parseReviewResult(await Deno.readTextFile(requireEnv("REVIEW_RESULT_PATH")));
+  if (!parsed.ok) throw new Error(`The review result is invalid: ${parsed.errors.join("; ")}`);
+  const candidates = parsed.value.findings.map((finding, index) => ({ index, ...finding }));
+  await Deno.writeTextFile(path, JSON.stringify(candidates, null, 2));
+}
+
 await runMain(async () => {
+  const pass = requirePass();
   const repository = requireEnv("REPOSITORY");
   const number = requirePositiveInteger("PR_NUMBER");
   const baseSha = requireSha("BASE_SHA");
@@ -94,14 +137,20 @@ await runMain(async () => {
       2,
     ),
   );
+  if (pass === "verify") await writeCandidates(`${workspace}/${contextDir}/candidates.json`);
 
+  const projectFiles: string[] = [];
+  for (const candidate of instructionFileCandidates(changedPaths(files))) {
+    if (await isFile(`${workspace}/${candidate}`)) projectFiles.push(candidate);
+  }
+  const { template, schema } = passes[pass];
   const prompt = renderPrompt(
-    await Deno.readTextFile(requireEnv("PROMPT_TEMPLATE")),
+    [await readTemplate(template), await readTemplate("shared.md")],
     { repository, number, headSha, headDir, contextDir },
-    await readOptional(`${workspace}/REVIEW.md`),
+    { reviewGuide: await readOptional(`${workspace}/REVIEW.md`), projectFiles },
   );
   await Deno.writeTextFile(`${workspace}/${workDir}/prompt.md`, prompt);
-  await Deno.writeTextFile(`${workspace}/${workDir}/result-schema.json`, schemaJson());
+  await Deno.writeTextFile(`${workspace}/${workDir}/schema.json`, JSON.stringify(schema));
   await setOutput("prompt", prompt);
-  await setOutput("claude-args", claudeArgs(Deno.env.get("MODEL") || undefined));
+  await setOutput("claude-args", claudeArgs(Deno.env.get("MODEL") || undefined, schema));
 });

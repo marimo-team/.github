@@ -1,0 +1,105 @@
+import type { ReviewEvent, Verdict } from "./decide.ts";
+import type { Authority, Harness } from "./policy.ts";
+import type { Finding, ReviewResult } from "./result.ts";
+import { sanitizeMarkdown } from "./sanitize.ts";
+
+export interface RunInfo {
+  readonly harness: Harness;
+  readonly model?: string;
+  readonly requester: string;
+  readonly runUrl: string;
+  readonly headSha: string;
+}
+
+const harnessNames: Record<Harness, string> = { claude: "Claude Code", codex: "Codex" };
+const verdictNames: Record<Verdict["kind"], string> = {
+  approve: "Approve",
+  request_changes: "Request changes",
+  comment: "Comment",
+};
+const eventKinds: Record<ReviewEvent, Verdict["kind"]> = {
+  APPROVE: "approve",
+  REQUEST_CHANGES: "request_changes",
+  COMMENT: "comment",
+};
+
+function attribution(run: RunInfo): string {
+  const agent = run.model
+    ? `${run.model} via ${harnessNames[run.harness]}`
+    : harnessNames[run.harness];
+  return `> 🤖 Automated review by ${agent}, requested by \`${run.requester}\`.`;
+}
+
+function footer(run: RunInfo): string {
+  return `Reviewed \`${run.headSha}\` · [Run](${run.runUrl})`;
+}
+
+export function progressBody(run: RunInfo, status: string): string {
+  return `${attribution(run)}\n\n${status}\n\n${footer(run)}`;
+}
+
+function decisionSection(verdict: Verdict, event: ReviewEvent, authority: Authority): string {
+  const enforced = eventKinds[event] === verdict.kind;
+  const heading = enforced
+    ? `**Decision: ${verdictNames[verdict.kind]}**`
+    : `**Proposed decision: ${
+      verdictNames[verdict.kind]
+    }** (not enforced; this repository's policy is \`${authority}\`)`;
+  // Reasons can quote changed file names, which the PR author controls.
+  const reasons = verdict.kind === "request_changes"
+    ? verdict.blocking.map((finding) => `${finding.severity}: ${finding.title}`)
+    : verdict.kind === "comment"
+    ? verdict.reasons
+    : [];
+  return [heading, ...reasons.map((reason) => `- ${sanitizeMarkdown(reason)}`)].join("\n");
+}
+
+function findingLine(finding: Finding): string {
+  return `- **${finding.severity.toUpperCase()}** \`${
+    sanitizeMarkdown(finding.path)
+  }:${finding.line}\` ${sanitizeMarkdown(finding.title)}\n\n  ${
+    sanitizeMarkdown(finding.body).replaceAll("\n", "\n  ")
+  }`;
+}
+
+export function reviewBody(options: {
+  readonly run: RunInfo;
+  readonly result: ReviewResult;
+  readonly verdict: Verdict;
+  readonly event: ReviewEvent;
+  readonly authority: Authority;
+  readonly unanchored: readonly Finding[];
+  readonly notes: readonly string[];
+}): string {
+  const { run, result, verdict, event, authority, unanchored, notes } = options;
+  const limitations = result.limitations.length
+    ? `\n\n**Limitations**\n${
+      result.limitations.map((item) => `- ${sanitizeMarkdown(item)}`).join("\n")
+    }`
+    : "";
+  const sections = [
+    attribution(run),
+    decisionSection(verdict, event, authority),
+    sanitizeMarkdown(result.summary),
+    `<details><summary>Coverage</summary>\n\n${
+      sanitizeMarkdown(result.coverage)
+    }${limitations}\n\n</details>`,
+  ];
+  if (unanchored.length) {
+    sections.push(`**Findings outside the diff**\n\n${unanchored.map(findingLine).join("\n\n")}`);
+  }
+  if (notes.length) sections.push(notes.map((note) => `- ${note}`).join("\n"));
+  if (result.findings.length === 0) {
+    sections.push(
+      "No findings within the coverage above. This doesn't establish that the PR is correct.",
+    );
+  }
+  sections.push(footer(run));
+  return sections.join("\n\n");
+}
+
+export function findingComment(finding: Finding): string {
+  return `**${finding.severity.toUpperCase()}** · ${sanitizeMarkdown(finding.title)}\n\n${
+    sanitizeMarkdown(finding.body)
+  }`;
+}

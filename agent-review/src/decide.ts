@@ -1,6 +1,7 @@
 import { matchingGlob } from "./glob.ts";
 import { atLeastRole, atLeastSeverity, type RepoPolicy, type RepositoryRole } from "./policy.ts";
 import type { Finding, ReviewResult } from "./result.ts";
+import { codeSpan } from "./sanitize.ts";
 
 export interface ChangedFile {
   readonly path: string;
@@ -10,7 +11,6 @@ export interface ChangedFile {
 
 /** Live state fetched at publication time, never from the reviewer. */
 export interface PullState {
-  readonly open: boolean;
   readonly headSha: string;
   readonly authorRole: RepositoryRole;
   readonly files: readonly ChangedFile[];
@@ -45,12 +45,11 @@ function approvalBlockers(
   const notable = result.findings.filter((finding) => atLeastSeverity(finding.severity, "medium"));
   if (notable.length) reasons.push(`${notable.length} finding(s) at medium severity or above.`);
 
-  if (!pull.open) reasons.push("The PR is closed.");
   if (pull.headSha !== reviewedHeadSha) reasons.push("New commits were pushed after the review.");
 
   const touched = protectedPaths(pull.files, policy.neverAutoApprove);
   if (touched.length) {
-    const listed = touched.slice(0, 5).map((path) => `\`${path}\``).join(", ");
+    const listed = touched.slice(0, 5).map(codeSpan).join(", ");
     reasons.push(`Changes paths that need human approval: ${listed}.`);
   }
   if (pull.filesTruncated) reasons.push("The changed-file list was truncated.");

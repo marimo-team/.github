@@ -1,4 +1,4 @@
-import { requireEnv, requirePositiveInteger, runMain, setOutput } from "../src/actions.ts";
+import { requireEnv, requirePositiveInteger, runMain } from "../src/actions.ts";
 import { GitHubClient } from "../src/github.ts";
 import { atLeastRole, minimumRequesterRole } from "../src/policy.ts";
 import { policyFromEnv } from "./run-info.ts";
@@ -19,8 +19,6 @@ await runMain(async () => {
   const pull = await github.pull(number);
   if (pull.state !== "open") throw new Error(`PR #${number} is ${pull.state}`);
 
-  await setOutput("harness", policy.reviewer.harness);
-  await setOutput("model", policy.reviewer.model ?? "");
   console.log(
     `Reviewing ${repository}#${number} with ${policy.reviewer.harness}${
       policy.allowApprove ? ", approval allowed" : ""

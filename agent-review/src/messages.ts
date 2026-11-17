@@ -1,7 +1,7 @@
 import type { ReviewEvent, Verdict } from "./decide.ts";
 import type { Harness } from "./policy.ts";
 import type { Finding, ReviewResult } from "./result.ts";
-import { sanitizeMarkdown } from "./sanitize.ts";
+import { codeSpan, sanitizeMarkdown } from "./sanitize.ts";
 
 export interface RunInfo {
   readonly harness: Harness;
@@ -16,11 +16,6 @@ const verdictNames: Record<Verdict["kind"], string> = {
   approve: "Approve",
   request_changes: "Request changes",
   comment: "Comment",
-};
-const eventKinds: Record<ReviewEvent, Verdict["kind"]> = {
-  APPROVE: "approve",
-  REQUEST_CHANGES: "request_changes",
-  COMMENT: "comment",
 };
 
 function attribution(run: RunInfo): string {
@@ -42,12 +37,10 @@ export function progressBody(run: RunInfo, status: string): string {
 }
 
 function decisionSection(verdict: Verdict, event: ReviewEvent): string {
-  const enforced = eventKinds[event] === verdict.kind;
-  const heading = enforced
-    ? `**Decision: ${verdictNames[verdict.kind]}**`
-    : `**Proposed decision: ${
-      verdictNames[verdict.kind]
-    }** (this repository doesn't allow the bot to approve)`;
+  const approvalWithheld = verdict.kind === "approve" && event !== "APPROVE";
+  const heading = approvalWithheld
+    ? "**Proposed decision: Approve** (this repository doesn't allow the bot to approve)"
+    : `**Decision: ${verdictNames[verdict.kind]}**`;
   // Reasons can quote changed file names, which the PR author controls.
   const reasons = verdict.kind === "request_changes"
     ? verdict.blocking.map((finding) => `${finding.severity}: ${finding.title}`)
@@ -58,11 +51,9 @@ function decisionSection(verdict: Verdict, event: ReviewEvent): string {
 }
 
 function findingLine(finding: Finding): string {
-  return `- **${finding.severity.toUpperCase()}** \`${
-    sanitizeMarkdown(finding.path)
-  }:${finding.line}\` ${sanitizeMarkdown(finding.title)}\n\n  ${
-    sanitizeMarkdown(finding.body).replaceAll("\n", "\n  ")
-  }`;
+  return `- **${finding.severity.toUpperCase()}** ${codeSpan(`${finding.path}:${finding.line}`)} ${
+    sanitizeMarkdown(finding.title)
+  }\n\n  ${sanitizeMarkdown(finding.body).replaceAll("\n", "\n  ")}`;
 }
 
 export function reviewBody(options: {

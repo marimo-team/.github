@@ -24,16 +24,14 @@ export function parseJsonObject(raw: string): Parsed<JsonObject> {
 export class Reader {
   readonly errors: string[] = [];
 
+  /** Truncates to `max` characters: an overlong field isn't worth discarding the output. */
   string(object: JsonObject, key: string, max: number, at: string): string {
     const value = object[key];
     if (typeof value !== "string" || value.trim() === "") {
       this.errors.push(`${at}.${key} must be a non-empty string`);
       return "";
     }
-    if (value.length > max) {
-      this.errors.push(`${at}.${key} exceeds ${max} characters`);
-    }
-    return value;
+    return value.length > max ? `${value.slice(0, max - 1)}…` : value;
   }
 
   integer(object: JsonObject, key: string, min: number, at: string): number {

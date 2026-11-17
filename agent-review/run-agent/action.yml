@@ -45,13 +45,14 @@ runs:
         github_token: ${{ github.token }}
         prompt: ${{ inputs.prompt }}
         claude_args: ${{ inputs.claude-args }}
+    # Read from the transcript file: an environment variable can't hold more than 128 KiB.
     - name: Save Claude output
       if: inputs.harness == 'claude'
       shell: bash
       env:
-        STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
+        EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         OUTPUT_FILE: ${{ inputs.output-file }}
-      run: printf '%s' "$STRUCTURED_OUTPUT" > "$OUTPUT_FILE"
+      run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output // empty' "$EXECUTION_FILE" > "$OUTPUT_FILE"
 
     # Codex drops sudo irreversibly and refuses to run again in the same job, so each
     # pass that uses this action runs in its own job.

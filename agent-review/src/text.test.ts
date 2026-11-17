@@ -1,7 +1,7 @@
 import { deepEqual as assertEquals, throws as assertThrows } from "node:assert/strict";
 import { renderPrompt } from "./prompt.ts";
 import { reviewBody } from "./messages.ts";
-import { sanitizeMarkdown } from "./sanitize.ts";
+import { codeSpan, sanitizeMarkdown } from "./sanitize.ts";
 
 const variables = {
   repository: "marimo-team/marimo",
@@ -39,6 +39,10 @@ Deno.test("sanitizes untrusted model markdown", () => {
   assertEquals(sanitizeMarkdown('a<img src="https://evil.test">b'), "ab");
   assertEquals(sanitizeMarkdown("cc @octocat"), "cc @\u200boctocat");
   assertEquals(sanitizeMarkdown("`List<String>` and a && b"), "`List<String>` and a && b");
+});
+
+Deno.test("keeps file names inside their code span", () => {
+  assertEquals(codeSpan("a`![x](https://e)`.py"), "`a'[x](https://e)'.py`");
 });
 
 Deno.test("review body distinguishes proposed from enforced decisions", () => {

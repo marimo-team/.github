@@ -6,7 +6,7 @@ import {
   warning,
 } from "../src/actions.ts";
 import { evaluate, type PullState, reviewEvent, supersededReviews } from "../src/decide.ts";
-import { anchorFindings } from "../src/diff.ts";
+import { type AnchoredFindings, anchorFindings } from "../src/diff.ts";
 import { comparisonFileLimit, GitHubClient, GitHubError } from "../src/github.ts";
 import { findingComment, progressBody, reviewBody, type RunInfo } from "../src/messages.ts";
 import { botLogin, type RepoPolicy, reviewLabel } from "../src/policy.ts";
@@ -80,7 +80,6 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
 
   const files = comparison.files ?? [];
   const state: PullState = {
-    open: true,
     headSha: pull.head.sha,
     authorRole: await reader.role(pull.user.login),
     files: files.map((file) => ({
@@ -97,27 +96,19 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
   for (const file of files) {
     if (file.patch !== undefined) patches.set(file.filename, file.patch);
   }
-  let { inline, unanchored } = anchorFindings(result.findings, patches);
   const notes: string[] = [];
   if (rejected) {
     notes.push(`Verification rejected ${rejected} candidate finding${rejected === 1 ? "" : "s"}.`);
   }
-  if (pull.head.sha !== run.headSha) {
-    notes.push("Newer commits exist; this review doesn't cover them.");
-  }
+  const headMoved = pull.head.sha !== run.headSha;
+  if (headMoved) notes.push("Newer commits exist; this review doesn't cover them.");
 
-  const submit = () =>
+  const submit = ({ inline, unanchored }: AnchoredFindings) =>
     writer.createReview(number, {
-      commit_id: run.headSha,
+      // GitHub rejects a commit a force-push removed, and line comments on a stale head.
+      commit_id: headMoved ? undefined : run.headSha,
       event,
-      body: reviewBody({
-        run,
-        result,
-        verdict,
-        event,
-        unanchored,
-        notes,
-      }),
+      body: reviewBody({ run, result, verdict, event, unanchored, notes }),
       comments: inline.map((finding) => ({
         path: finding.path,
         line: finding.line,
@@ -125,14 +116,14 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
         body: findingComment(finding),
       })),
     });
-  const review = await submit().catch((error) => {
-    if (!(inline.length && isAnchoringError(error))) throw error;
+  const inBody: AnchoredFindings = { inline: [], unanchored: result.findings };
+  const anchored = headMoved ? inBody : anchorFindings(result.findings, patches);
+  const review = await submit(anchored).catch((error) => {
+    if (!(anchored.inline.length && isAnchoringError(error))) throw error;
     warning(
       `GitHub rejected the inline comments; posting them in the review body: ${error.message}`,
     );
-    unanchored = result.findings;
-    inline = [];
-    return submit();
+    return submit(inBody);
   });
 
   const superseded = supersededReviews(

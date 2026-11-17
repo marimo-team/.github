@@ -11,7 +11,6 @@ export function claudeArgs(model: string | undefined, schema: object): string {
   return [
     ...(model ? [`--model ${model}`] : []),
     "--tools Read,Grep,Glob",
-    "--disallowedTools Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Agent",
     "--permission-mode dontAsk",
     "--strict-mcp-config",
     "--max-turns 100",

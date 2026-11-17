@@ -44,6 +44,10 @@ const alwaysNeedsHuman = [
   "**/CLAUDE.md",
   ".claude/**",
   ".codex/**",
+  // Who must review, which code is vendored, and what runs on contributors' machines.
+  "**/CODEOWNERS",
+  ".gitmodules",
+  ".pre-commit-config.yaml",
   // Dependency changes are supply-chain decisions.
   "**/package.json",
   "**/pnpm-lock.yaml",

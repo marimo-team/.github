@@ -15,7 +15,6 @@ export interface PullRequest {
   readonly body: string | null;
   readonly user: { readonly login: string };
   readonly head: { readonly sha: string };
-  readonly base: { readonly sha: string };
 }
 
 export interface ComparedFile {
@@ -145,7 +144,8 @@ export class GitHubClient {
   createReview(
     number: number,
     review: {
-      commit_id: string;
+      /** Omit to review the current head. */
+      commit_id?: string;
       event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
       body: string;
       comments: readonly NewReviewComment[];

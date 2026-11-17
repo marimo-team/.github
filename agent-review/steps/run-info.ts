@@ -1,13 +1,12 @@
 import { requireEnv, requireSha } from "../src/actions.ts";
 import type { RunInfo } from "../src/messages.ts";
-import { harnesses, parsePolicy, type RepoPolicy } from "../src/policy.ts";
+import { parsePolicy, type RepoPolicy } from "../src/policy.ts";
 
 export function runInfoFromEnv(): RunInfo {
-  const harness = harnesses.find((value) => value === requireEnv("HARNESS"));
-  if (!harness) throw new Error("HARNESS must be claude or codex");
+  const { harness, model } = policyFromEnv().reviewer;
   return {
     harness,
-    model: Deno.env.get("MODEL") || undefined,
+    model,
     requester: requireEnv("REQUESTER"),
     runUrl: requireEnv("RUN_URL"),
     headSha: requireSha("HEAD_SHA"),

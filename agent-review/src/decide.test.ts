@@ -29,7 +29,6 @@ const clean: ReviewResult = {
 };
 
 const eligible: PullState = {
-  open: true,
   headSha: head,
   authorRole: "write",
   files: [{ path: "src/a.ts", changes: 10 }],
@@ -54,7 +53,6 @@ Deno.test("each approval condition independently prevents approval", () => {
     ["incomplete", { ...clean, outcome: "incomplete" }, eligible],
     ["limitations", { ...clean, limitations: ["skipped tests"] }, eligible],
     ["medium finding", { ...clean, findings: [finding("medium")] }, eligible],
-    ["closed", clean, { ...eligible, open: false }],
     ["head moved", clean, { ...eligible, headSha: "b".repeat(40) }],
     ["protected path", clean, {
       ...eligible,

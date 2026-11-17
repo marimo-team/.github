@@ -19,3 +19,8 @@ export function sanitizeMarkdown(text: string): string {
   }
   return current.replace(/@(?=[A-Za-z0-9])/g, "@​");
 }
+
+/** Wraps text in a code span; backticks in it would end the span early. */
+export function codeSpan(text: string): string {
+  return `\`${sanitizeMarkdown(text.replaceAll("`", "'"))}\``;
+}

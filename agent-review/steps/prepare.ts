@@ -12,6 +12,7 @@ import { botLogin } from "../src/policy.ts";
 import { renderPrompt } from "../src/prompt.ts";
 import { parseReviewResult, reviewResultSchema } from "../src/result.ts";
 import { verificationSchema } from "../src/verification.ts";
+import { policyFromEnv } from "./run-info.ts";
 
 const maxDiffBytes = 1_500_000;
 
@@ -23,7 +24,9 @@ type Pass = keyof typeof passes;
 
 function requirePass(): Pass {
   const pass = requireEnv("PASS");
-  if (!(pass in passes)) throw new Error(`PASS must be one of ${Object.keys(passes).join(", ")}`);
+  if (!Object.hasOwn(passes, pass)) {
+    throw new Error(`PASS must be one of ${Object.keys(passes).join(", ")}`);
+  }
   return pass as Pass;
 }
 
@@ -50,6 +53,7 @@ async function writeCandidates(path: string): Promise<void> {
 
 await runMain(async () => {
   const pass = requirePass();
+  const { harness, model } = policyFromEnv().reviewer;
   const repository = requireEnv("REPOSITORY");
   const number = requirePositiveInteger("PR_NUMBER");
   const baseSha = requireSha("BASE_SHA");
@@ -132,5 +136,7 @@ await runMain(async () => {
   await Deno.writeTextFile(`${workspace}/${workDir}/prompt.md`, prompt);
   await Deno.writeTextFile(`${workspace}/${workDir}/schema.json`, JSON.stringify(schema));
   await setOutput("prompt", prompt);
-  await setOutput("claude-args", claudeArgs(Deno.env.get("MODEL") || undefined, schema));
+  await setOutput("harness", harness);
+  await setOutput("model", model ?? "");
+  await setOutput("claude-args", claudeArgs(model, schema));
 });

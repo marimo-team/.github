@@ -34,11 +34,14 @@ export function isRelativeRepositoryPath(path: string): boolean {
   );
 }
 
+// Strict-mode schemas can't state these, so the parser truncates to them.
 const limits = {
   findings: 30,
+  /** More than this many is malformed, not merely verbose. */
+  findingsParsed: 500,
   limitations: 30,
   title: 200,
-  body: 8_000,
+  body: 4_000,
   text: 8_000,
 } as const;
 
@@ -87,7 +90,7 @@ export const reviewResultSchema = {
 } as const;
 
 function readFinding(reader: Reader, value: JsonObject, at: string): Finding {
-  const path = reader.string(value, "path", maxPathLength, at);
+  const path = reader.string(value, "path", maxPathLength, at).replace(/^(?:\.\/)+/, "");
   if (path && !isRelativeRepositoryPath(path)) {
     reader.errors.push(`${at}.path must be a relative repository path`);
   }
@@ -101,28 +104,59 @@ function readFinding(reader: Reader, value: JsonObject, at: string): Finding {
   };
 }
 
+/** Keeps the `count` most severe findings, in their original order. */
+function mostSevere(findings: readonly Finding[], count: number): Finding[] {
+  if (findings.length <= count) return [...findings];
+  const rank = (finding: Finding) => severities.indexOf(finding.severity);
+  const kept = new Set(
+    findings.map((finding, index) => ({ finding, index }))
+      .sort((a, b) => rank(b.finding) - rank(a.finding) || a.index - b.index)
+      .slice(0, count)
+      .map(({ index }) => index),
+  );
+  return findings.filter((_, index) => kept.has(index));
+}
+
+/** Agents read the PR head under `headDir`, so their paths can carry that prefix. */
+export function withoutHeadDir(result: ReviewResult, headDir: string): ReviewResult {
+  const prefix = `${headDir}/`;
+  return {
+    ...result,
+    findings: result.findings.map((finding) =>
+      finding.path.startsWith(prefix)
+        ? { ...finding, path: finding.path.slice(prefix.length) }
+        : finding
+    ),
+  };
+}
+
 export function parseReviewResult(raw: string): Parsed<ReviewResult> {
   const parsed = parseJsonObject(raw);
   if (!parsed.ok) return parsed;
   const value = parsed.value;
 
   const reader = new Reader();
-  const limitations = reader.array(value, "limitations", limits.limitations, "result").map(
+  const limitations = reader.array(value, "limitations", Infinity, "result").slice(
+    0,
+    limits.limitations,
+  ).flatMap(
     (item, index) => {
-      if (typeof item !== "string" || item.trim() === "" || item.length > limits.text) {
-        reader.errors.push(`result.limitations[${index}] must be a non-empty string`);
-        return "";
-      }
-      return item;
+      if (typeof item === "string" && item.trim() !== "") return [item.slice(0, limits.text)];
+      reader.errors.push(`result.limitations[${index}] must be a non-empty string`);
+      return [];
     },
   );
-  const findings = reader.array(value, "findings", limits.findings, "result").flatMap(
+  const parsedFindings = reader.array(value, "findings", limits.findingsParsed, "result").flatMap(
     (item, index) => {
       const at = `result.findings[${index}]`;
       const object = reader.object(item, at);
       return object ? [readFinding(reader, object, at)] : [];
     },
   );
+  const findings = mostSevere(parsedFindings, limits.findings);
+  const omitted = parsedFindings.length - findings.length;
+  if (omitted) limitations.push(`${omitted} lower-severity findings were omitted.`);
+
   return reader.finish({
     outcome: reader.oneOf(value, "outcome", ["completed", "incomplete"], "result"),
     summary: reader.string(value, "summary", limits.text, "result"),

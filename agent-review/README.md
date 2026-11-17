@@ -14,44 +14,37 @@ findings as a PR review. Repositories call the reusable workflow in
 | `verify`  | read only                       | model credentials | the PR, via the agent |
 | `publish` | read; bot token for the review  | bot key           | the agent's output    |
 
-- The agent can only read files in the workspace. Claude Code gets `Read`, `Grep`, and `Glob` in
-  `dontAsk` mode; Codex runs in its read-only sandbox.
-- The workspace root is the base branch. The PR head is checked out under `pr-head/` as files to
-  read, and nothing executes it.
-- The instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`, `AGENTS.md`,
-  and `CLAUDE.md`. The PR can't change the instructions it's reviewed under.
-- The bot key's Doppler identity trusts only OIDC tokens whose subject names the `agent-review-bot`
-  environment, which only `start` and `publish` run in. The agent jobs run outside it, so a token an
-  agent obtained couldn't fetch the bot key.
-- The agent's output is discarded if it contains anything shaped like a credential, before it's
-  uploaded as an artifact. Codex can run read-only shell commands in a job whose environment holds
-  Actions tokens; this catches a token printed verbatim, not an encoded one.
-- [`publish.ts`](steps/publish.ts) validates the agent's output and decides what to post using live
-  PR state and the repository's policy. The agent can't choose the review event.
+- Claude Code gets only `Read`, `Grep`, and `Glob`, confined to the workspace. Codex runs in its
+  read-only sandbox, which can read the whole runner and run scripts, but can't write or reach the
+  network. No workflow step executes the PR head, which is checked out under `pr-head/`.
+- Instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`, `AGENTS.md`, and
+  `CLAUDE.md`, so the PR can't change them.
+- `start` and `publish` run in the `agent-review-bot` environment, the only one that can fetch the
+  bot key. `review` and `verify` run in `agent-review`, the only one that can fetch model keys.
+- Output containing anything shaped like a credential is discarded before upload. It catches tokens
+  printed verbatim, not encoded ones.
+- [`publish.ts`](steps/publish.ts) picks the review event from live PR state and the repository's
+  policy; the agent can't.
 
 ## Policy
 
-Each repository sets its policy as inputs in its caller workflow. That workflow runs from the
-default branch, so a PR can't change the policy it's reviewed under.
-
-The bot requests changes for findings at or above `block-at-severity` and comments otherwise. With
-`allow-approve: true`, it also approves when every condition in [`decide.ts`](src/decide.ts) holds.
-It doesn't check CI; branch protection's required checks still gate merging.
-
-[`policy.ts`](src/policy.ts) holds what every repository shares: the paths that always need a human
-approval, which `never-auto-approve` adds to, and the minimum author role for approval.
+Repositories set policy as inputs in their caller workflow, which runs from the default branch. The
+bot requests changes for findings at or above `block-at-severity` and comments otherwise. With
+`allow-approve: true`, it also approves when [`decide.ts`](src/decide.ts) allows; it doesn't check
+CI, which branch protection covers. Turn on "dismiss stale approvals" first, so a push after the
+bot's approval needs a new one. [`policy.ts`](src/policy.ts) holds the shared defaults, including
+paths that always need a human.
 
 ## Adding a repository
 
-1. Install `marimo-oss-bot` on the repository and create the `agent-review` label.
-2. Create the `agent-review-bot` environment and restrict its deployment branches to the default
-   branch. Otherwise anyone with write access could push a branch whose workflow runs in the
-   environment and fetches the bot key. Review jobs still qualify, because `pull_request_target`
-   runs on the default branch.
-3. Add `repo:marimo-team/<repository>:environment:agent-review-bot` to the subjects the publish
-   Doppler identity accepts. On both Doppler identities, also require the `job_workflow_ref` claim
-   to match `marimo-team/.github/.github/workflows/agent-review.yml@*`, so no other workflow in the
-   repository can fetch these credentials.
+1. Install `marimo-oss-bot` and create the `agent-review` label.
+2. Create the `agent-review` and `agent-review-bot` environments and restrict both to the default
+   branch, before Doppler trusts them. Otherwise a workflow on another branch could create or use
+   them and fetch the keys.
+3. In Doppler, add `repo:marimo-team/<repository>:environment:agent-review` to the review identity's
+   subjects and `…:environment:agent-review-bot` to the publish identity's. On both, also require
+   `repository_owner` `marimo-team`, `ref` `refs/heads/<default branch>`, and `job_workflow_ref`
+   `marimo-team/.github/.github/workflows/agent-review.yml@*`.
 4. Add a caller workflow:
 
    ```yaml
@@ -82,8 +75,7 @@ approval, which `never-auto-approve` adds to, and the minimum author role for ap
          # never-auto-approve: "" # extra globs, one per line
    ```
 
-5. Optionally, add review instructions in `REVIEW.md` at the repository root, the same file
-   Anthropic's managed Code Review reads.
+5. Optionally, add `REVIEW.md` at the repository root with review instructions.
 
 ## Development
 

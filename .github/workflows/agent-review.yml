@@ -70,6 +70,7 @@ jobs:
     # GitHub's OIDC tokens are the same for every job in a run, except for the
     # environment. The bot's Doppler identity trusts only this environment's subject,
     # so the agent jobs can't fetch the bot key even if an agent obtains a token.
+    # Both environments allow only the default branch, so branch workflows can't use them.
     environment:
       name: agent-review-bot
       deployment: false
@@ -79,8 +80,6 @@ jobs:
       pull-requests: read
       id-token: write # Doppler OIDC
     outputs:
-      harness: ${{ steps.authorize.outputs.harness }}
-      model: ${{ steps.authorize.outputs.model }}
       comment-id: ${{ steps.progress.outputs.comment-id }}
     steps:
       - name: Check policy ref
@@ -103,7 +102,7 @@ jobs:
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: deno run --no-prompt --allow-net=api.github.com --allow-env --allow-write="$GITHUB_OUTPUT" steps/authorize.ts
+        run: deno run --no-prompt --allow-net=api.github.com --allow-env steps/authorize.ts
       - name: Fetch bot credentials
         id: bot-secrets
         uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
@@ -126,8 +125,6 @@ jobs:
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:
           GITHUB_TOKEN: ${{ steps.bot-token.outputs.token }}
-          HARNESS: ${{ steps.authorize.outputs.harness }}
-          MODEL: ${{ steps.authorize.outputs.model }}
         run: deno run --no-prompt --allow-net=api.github.com --allow-env --allow-write="$GITHUB_OUTPUT" steps/start.ts
 
   review:
@@ -135,6 +132,10 @@ jobs:
     needs: start
     runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
     timeout-minutes: 30
+    # The model credentials' Doppler identity trusts only this environment's subject.
+    environment:
+      name: agent-review
+      deployment: false
     # No write access: the agent reads untrusted PR content in this job.
     permissions:
       contents: read
@@ -148,6 +149,7 @@ jobs:
       - name: Check out base branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.BASE_SHA }}
           persist-credentials: false
       - name: Check out PR head as review material
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -172,7 +174,6 @@ jobs:
         env:
           PASS: review
           GITHUB_TOKEN: ${{ github.token }}
-          MODEL: ${{ needs.start.outputs.model }}
         run: >-
           deno run --no-prompt --allow-net=api.github.com --allow-env
           --allow-read="$GITHUB_WORKSPACE" --allow-write="$GITHUB_WORKSPACE/$WORK_DIR,$GITHUB_OUTPUT"
@@ -190,8 +191,8 @@ jobs:
       - name: Review
         uses: ./_agent_review/central/agent-review/run-agent # zizmor: ignore[self-repository]
         with:
-          harness: ${{ needs.start.outputs.harness }}
-          model: ${{ needs.start.outputs.model }}
+          harness: ${{ steps.prepare.outputs.harness }}
+          model: ${{ steps.prepare.outputs.model }}
           prompt: ${{ steps.prepare.outputs.prompt }}
           claude-args: ${{ steps.prepare.outputs.claude-args }}
           schema-file: ${{ env.WORK_DIR }}/schema.json
@@ -206,7 +207,7 @@ jobs:
           OUTPUT_PATH: ${{ github.workspace }}/${{ env.WORK_DIR }}/result.json
         run: >-
           deno run --no-prompt --allow-env --allow-read="$GITHUB_WORKSPACE"
-          --allow-write="$GITHUB_OUTPUT" steps/check-output.ts
+          --allow-write="$GITHUB_WORKSPACE/$WORK_DIR,$GITHUB_OUTPUT" steps/check-output.ts
       - name: Upload result
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -224,6 +225,9 @@ jobs:
     if: needs.review.outputs.findings != '0'
     runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
     timeout-minutes: 20
+    environment:
+      name: agent-review
+      deployment: false
     permissions:
       contents: read
       pull-requests: read
@@ -232,6 +236,7 @@ jobs:
       - name: Check out base branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.BASE_SHA }}
           persist-credentials: false
       - name: Check out PR head as review material
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -261,7 +266,6 @@ jobs:
         env:
           PASS: verify
           GITHUB_TOKEN: ${{ github.token }}
-          MODEL: ${{ needs.start.outputs.model }}
           REVIEW_RESULT_PATH: ${{ runner.temp }}/agent-review-result/result.json
         run: >-
           deno run --no-prompt --allow-net=api.github.com --allow-env
@@ -279,8 +283,8 @@ jobs:
       - name: Verify
         uses: ./_agent_review/central/agent-review/run-agent # zizmor: ignore[self-repository]
         with:
-          harness: ${{ needs.start.outputs.harness }}
-          model: ${{ needs.start.outputs.model }}
+          harness: ${{ steps.prepare.outputs.harness }}
+          model: ${{ steps.prepare.outputs.model }}
           prompt: ${{ steps.prepare.outputs.prompt }}
           claude-args: ${{ steps.prepare.outputs.claude-args }}
           schema-file: ${{ env.WORK_DIR }}/schema.json
@@ -292,9 +296,10 @@ jobs:
         env:
           PASS: verify
           OUTPUT_PATH: ${{ github.workspace }}/${{ env.WORK_DIR }}/verification.json
+          REVIEW_RESULT_PATH: ${{ runner.temp }}/agent-review-result/result.json
         run: >-
-          deno run --no-prompt --allow-env --allow-read="$GITHUB_WORKSPACE"
-          --allow-write="$GITHUB_OUTPUT" steps/check-output.ts
+          deno run --no-prompt --allow-env --allow-read="$GITHUB_WORKSPACE,$RUNNER_TEMP"
+          steps/check-output.ts
       - name: Upload verification
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -369,6 +374,4 @@ jobs:
           VERIFY_JOB_RESULT: ${{ needs.verify.result }}
           VERIFICATION_PATH: ${{ runner.temp }}/agent-review-verification/verification.json
           COMMENT_ID: ${{ needs.start.outputs.comment-id }}
-          HARNESS: ${{ needs.start.outputs.harness }}
-          MODEL: ${{ needs.start.outputs.model }}
         run: deno run --no-prompt --allow-net=api.github.com --allow-env --allow-read="$RUNNER_TEMP" steps/publish.ts

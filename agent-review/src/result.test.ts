@@ -1,5 +1,5 @@
 import { deepEqual as assertEquals } from "node:assert/strict";
-import { parseReviewResult } from "./result.ts";
+import { parseReviewResult, withoutHeadDir } from "./result.ts";
 
 const valid = {
   outcome: "completed",
@@ -24,7 +24,25 @@ Deno.test("rejects malformed output", () => {
   assertEquals(errorsFor([]).length, 1);
   assertEquals(errorsFor({ ...valid, outcome: "done" }).length, 1);
   assertEquals(errorsFor({ ...valid, summary: " " }).length, 1);
-  assertEquals(errorsFor({ ...valid, findings: Array(31).fill(valid.findings[0]) }).length, 1);
+  assertEquals(errorsFor({ ...valid, findings: [{ ...valid.findings[0], line: "3" }] }).length, 1);
+});
+
+Deno.test("trims verbose output instead of rejecting it", () => {
+  const low = { ...valid.findings[0], severity: "low" };
+  const findings = [...Array(30).fill(low), valid.findings[0], { ...low, title: "x".repeat(500) }];
+  const parsed = parseReviewResult(JSON.stringify({ ...valid, findings }));
+  if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+  const kept = parsed.value.findings;
+  assertEquals(kept.length, 30);
+  assertEquals(kept.filter((finding) => finding.severity === "high").length, 1);
+  assertEquals(parsed.value.limitations, ["2 lower-severity findings were omitted."]);
+});
+
+Deno.test("normalizes paths agents write relative to where they read", () => {
+  const finding = { ...valid.findings[0], path: "./pr-head/src/a.py" };
+  const parsed = parseReviewResult(JSON.stringify({ ...valid, findings: [finding] }));
+  if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+  assertEquals(withoutHeadDir(parsed.value, "pr-head").findings[0]?.path, "src/a.py");
 });
 
 Deno.test("rejects findings that point outside the repository", () => {

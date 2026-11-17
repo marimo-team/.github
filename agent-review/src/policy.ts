@@ -36,6 +36,7 @@ const defaults: RepoPolicy = {
   neverAutoApprove: [
     // Workflows, repository review guidance, and agent instructions.
     ".github/**",
+    "REVIEW.md",
     "**/AGENTS.md",
     "**/CLAUDE.md",
     ".claude/**",

@@ -16,8 +16,8 @@ A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews
   `dontAsk` mode; Codex runs in its read-only sandbox.
 - The workspace root is the base branch. The PR head is checked out under `pr-head/` as files to
   read, and nothing executes it.
-- The review instructions come from [`prompt.md`](prompt.md) and the base branch's
-  `.github/agent-review.md`. The PR can't change the instructions it's reviewed under.
+- The review instructions come from [`prompt.md`](prompt.md) and the base branch's `REVIEW.md`. The
+  PR can't change the instructions it's reviewed under.
 - [`publish.ts`](steps/publish.ts) validates the agent's output and decides what to post using live
   PR state and [`policy.ts`](src/policy.ts). The agent can't choose the review event.
 
@@ -60,7 +60,8 @@ Repositories without an entry get the advisory defaults.
          policy-ref: <sha>
    ```
 
-3. Optionally, add review guidance in `.github/agent-review.md`.
+3. Optionally, add review instructions in `REVIEW.md` at the repository root, the same file
+   Anthropic's managed Code Review reads.
 
 ## Development
 

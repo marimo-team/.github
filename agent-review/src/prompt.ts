@@ -21,5 +21,5 @@ export function renderPrompt(
     return String(variables[name as keyof PromptVariables]);
   });
   if (!guidance?.trim()) return rendered;
-  return `${rendered.trimEnd()}\n\n## Repository guidance\n\nFrom the base branch's \`.github/agent-review.md\`:\n\n${guidance.trim()}\n`;
+  return `${rendered.trimEnd()}\n\n## Repository guidance\n\nFrom the base branch's \`REVIEW.md\`:\n\n${guidance.trim()}\n`;
 }

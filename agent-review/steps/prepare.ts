@@ -98,7 +98,7 @@ await runMain(async () => {
   const prompt = renderPrompt(
     await Deno.readTextFile(requireEnv("PROMPT_TEMPLATE")),
     { repository, number, headSha, headDir, contextDir },
-    await readOptional(`${workspace}/.github/agent-review.md`),
+    await readOptional(`${workspace}/REVIEW.md`),
   );
   await Deno.writeTextFile(`${workspace}/${workDir}/prompt.md`, prompt);
   await Deno.writeTextFile(`${workspace}/${workDir}/result-schema.json`, schemaJson());

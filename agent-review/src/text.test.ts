@@ -21,7 +21,7 @@ Deno.test("renders prompt variables and appends repository instructions", () => 
   assertEquals(prompt.startsWith("Review #7.\n\nRead pr-head/."), true);
   assertEquals(prompt.includes("- `marimo/_server/AGENTS.md`"), true);
   assertEquals(prompt.indexOf("AGENTS.md") < prompt.indexOf("Check the kernel."), true);
-  assertEquals(prompt.trimEnd().endsWith("`REVIEW.md`:\n\nCheck the kernel."), true);
+  assertEquals(prompt.trimEnd().endsWith("## Review instructions\n\nCheck the kernel."), true);
   assertEquals(renderPrompt(["x"], variables, { ...noInstructions, reviewGuide: "  \n" }), "x\n");
   assertThrows(() => renderPrompt(["{{missing}}"], variables, noInstructions));
 });

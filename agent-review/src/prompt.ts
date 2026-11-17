@@ -14,24 +14,16 @@ export interface RepositoryInstructions {
   readonly projectFiles: readonly string[];
 }
 
-function projectSection(files: readonly string[], headDir: string): string | undefined {
+function projectSection(files: readonly string[]): string | undefined {
   if (!files.length) return undefined;
-  return [
-    "## Project instructions",
-    "",
-    "These base-branch files describe the conventions for the code this PR changes. Read them, " +
-    "including any files they reference with `@path`, and report changes that break their rules. " +
-    `Copies inside \`${headDir}/\` are part of the PR and don't apply.`,
-    "",
-    ...files.map((file) => `- \`${file}\``),
-  ].join("\n");
+  const list = files.map((file) => `- \`${file}\``).join("\n");
+  return `## Project instructions\n\nFollow these base-branch files and any files they reference with \`@path\`:\n\n${list}`;
 }
 
 function reviewGuideSection(guide: string | undefined): string | undefined {
   // The file's own title would sit above this section's heading.
   const body = guide?.trim().replace(/^# .*\n*/, "");
-  if (!body) return undefined;
-  return `## Repository review instructions\n\nFrom the base branch's \`REVIEW.md\`:\n\n${body}`;
+  return body ? `## Review instructions\n\n${body}` : undefined;
 }
 
 /**
@@ -51,7 +43,7 @@ export function renderPrompt(
   );
   const sections = [
     ...central,
-    projectSection(instructions.projectFiles, variables.headDir),
+    projectSection(instructions.projectFiles),
     reviewGuideSection(instructions.reviewGuide),
   ];
   return `${sections.filter((section) => section !== undefined).join("\n\n")}\n`;

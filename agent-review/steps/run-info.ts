@@ -1,8 +1,6 @@
 import { requireEnv, requireSha } from "../src/actions.ts";
 import type { RunInfo } from "../src/messages.ts";
-import type { Harness } from "../src/policy.ts";
-
-const harnesses: readonly Harness[] = ["claude", "codex"];
+import { harnesses, parsePolicy, type RepoPolicy } from "../src/policy.ts";
 
 export function runInfoFromEnv(): RunInfo {
   const harness = harnesses.find((value) => value === requireEnv("HARNESS"));
@@ -14,4 +12,16 @@ export function runInfoFromEnv(): RunInfo {
     runUrl: requireEnv("RUN_URL"),
     headSha: requireSha("HEAD_SHA"),
   };
+}
+
+export function policyFromEnv(): RepoPolicy {
+  const input = (name: string) => Deno.env.get(`POLICY_${name}`) ?? "";
+  return parsePolicy({
+    authority: input("AUTHORITY"),
+    harness: input("HARNESS"),
+    model: input("MODEL"),
+    blockAtSeverity: input("BLOCK_AT_SEVERITY"),
+    neverAutoApprove: input("NEVER_AUTO_APPROVE"),
+    maxChangedLines: input("MAX_CHANGED_LINES"),
+  });
 }

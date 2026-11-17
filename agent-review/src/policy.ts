@@ -1,5 +1,8 @@
-export type Authority = "advisory" | "block" | "approve";
-export type Harness = "claude" | "codex";
+export const authorities = ["advisory", "block", "approve"] as const;
+export type Authority = (typeof authorities)[number];
+
+export const harnesses = ["claude", "codex"] as const;
+export type Harness = (typeof harnesses)[number];
 
 export const severities = ["low", "medium", "high", "critical"] as const;
 export type Severity = (typeof severities)[number];
@@ -29,35 +32,64 @@ export const reviewLabel = "agent-review";
 export const botLogin = "marimo-oss-bot[bot]";
 export const minimumRequesterRole: RepositoryRole = "write";
 
-const defaults: RepoPolicy = {
-  authority: "advisory",
-  reviewer: { harness: "claude", model: "claude-opus-5-5" },
-  blockAtSeverity: "high",
-  neverAutoApprove: [
-    // Workflows, repository review guidance, and agent instructions.
-    ".github/**",
-    "REVIEW.md",
-    "**/AGENTS.md",
-    "**/CLAUDE.md",
-    ".claude/**",
-    ".codex/**",
-    // Dependency changes are supply-chain decisions.
-    "**/package.json",
-    "**/pnpm-lock.yaml",
-    "**/pnpm-workspace.yaml",
-    "**/pyproject.toml",
-    "**/uv.lock",
-  ],
-  maxChangedLines: 400,
-  minimumAuthorRole: "write",
+const defaultModels: Readonly<Record<Harness, string | undefined>> = {
+  claude: "claude-opus-5-5",
+  codex: undefined,
 };
 
-const policies: Readonly<Record<string, RepoPolicy>> = {
-  "marimo-team/marimo": defaults,
-};
+/** Paths every repository needs a human to approve; a repository can add to these. */
+const alwaysNeedsHuman = [
+  // Workflows, repository review guidance, and agent instructions.
+  ".github/**",
+  "REVIEW.md",
+  "**/AGENTS.md",
+  "**/CLAUDE.md",
+  ".claude/**",
+  ".codex/**",
+  // Dependency changes are supply-chain decisions.
+  "**/package.json",
+  "**/pnpm-lock.yaml",
+  "**/pnpm-workspace.yaml",
+  "**/pyproject.toml",
+  "**/uv.lock",
+];
 
-export function resolvePolicy(repository: string): RepoPolicy {
-  return policies[repository] ?? defaults;
+/**
+ * The caller workflow's inputs, as strings. The caller workflow runs from the default
+ * branch, so a PR can't change the policy it's reviewed under.
+ */
+export interface PolicyInputs {
+  readonly authority: string;
+  readonly harness: string;
+  readonly model: string;
+  readonly blockAtSeverity: string;
+  readonly neverAutoApprove: string;
+  readonly maxChangedLines: string;
+}
+
+function oneOf<T extends string>(name: string, value: string, options: readonly T[]): T {
+  const match = options.find((option) => option === value);
+  if (!match) throw new Error(`${name} must be one of ${options.join(", ")}, not "${value}"`);
+  return match;
+}
+
+export function parsePolicy(inputs: PolicyInputs): RepoPolicy {
+  const harness = oneOf("harness", inputs.harness, harnesses);
+  const maxChangedLines = Number(inputs.maxChangedLines);
+  if (!Number.isInteger(maxChangedLines) || maxChangedLines < 1) {
+    throw new Error(
+      `max-changed-lines must be a positive integer, not "${inputs.maxChangedLines}"`,
+    );
+  }
+  const extraPaths = inputs.neverAutoApprove.split("\n").map((line) => line.trim()).filter(Boolean);
+  return {
+    authority: oneOf("authority", inputs.authority, authorities),
+    reviewer: { harness, model: inputs.model.trim() || defaultModels[harness] },
+    blockAtSeverity: oneOf("block-at-severity", inputs.blockAtSeverity, severities),
+    neverAutoApprove: [...alwaysNeedsHuman, ...extraPaths],
+    maxChangedLines,
+    minimumAuthorRole: "write",
+  };
 }
 
 export function atLeastSeverity(severity: Severity, threshold: Severity): boolean {

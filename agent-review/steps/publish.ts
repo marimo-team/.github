@@ -15,11 +15,11 @@ import {
 import { anchorFindings } from "../src/diff.ts";
 import { comparisonFileLimit, GitHubClient, GitHubError } from "../src/github.ts";
 import { findingComment, progressBody, reviewBody, type RunInfo } from "../src/messages.ts";
-import { botLogin, resolvePolicy, reviewLabel } from "../src/policy.ts";
+import { botLogin, type RepoPolicy, reviewLabel } from "../src/policy.ts";
 import type { Parsed } from "../src/reader.ts";
 import { parseReviewResult, type ReviewResult } from "../src/result.ts";
 import { applyVerification, parseVerification } from "../src/verification.ts";
-import { runInfoFromEnv } from "./run-info.ts";
+import { policyFromEnv, runInfoFromEnv } from "./run-info.ts";
 
 async function readOutput<T>(
   agent: string,
@@ -56,7 +56,7 @@ function isAnchoringError(error: unknown): boolean {
 }
 
 interface Context {
-  readonly repository: string;
+  readonly policy: RepoPolicy;
   readonly number: number;
   readonly baseSha: string;
   readonly run: RunInfo;
@@ -65,8 +65,7 @@ interface Context {
 }
 
 /** Posts the review and returns the status for the progress comment. */
-async function publish({ repository, number, baseSha, run, reader, writer }: Context) {
-  const policy = resolvePolicy(repository);
+async function publish({ policy, number, baseSha, run, reader, writer }: Context) {
   if (requireEnv("REVIEW_JOB_RESULT") !== "success") {
     return "The review failed before producing a result. See the run for details.";
   }
@@ -189,7 +188,7 @@ await runMain(async () => {
   let status: string;
   try {
     status = await publish({
-      repository,
+      policy: policyFromEnv(),
       number,
       baseSha: requireSha("BASE_SHA"),
       run,

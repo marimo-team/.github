@@ -3,9 +3,33 @@ on:
   workflow_call:
     inputs:
       policy-ref:
-        description: Commit SHA in marimo-team/.github containing the review code and policy
+        description: Commit SHA in marimo-team/.github containing the review code
         required: true
         type: string
+      authority:
+        description: "advisory posts comments, block requests changes, approve can also approve"
+        type: string
+        default: advisory
+      harness:
+        description: claude or codex
+        type: string
+        default: claude
+      model:
+        description: The harness's model; empty uses the default
+        type: string
+        default: ""
+      block-at-severity:
+        description: Findings at or above this severity request changes
+        type: string
+        default: high
+      never-auto-approve:
+        description: Globs, one per line, that always need a human approval, on top of the defaults
+        type: string
+        default: ""
+      max-changed-lines:
+        description: Larger PRs are never approved
+        type: number
+        default: 400
 
 permissions: {}
 
@@ -27,6 +51,12 @@ env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
   REQUESTER: ${{ github.event.sender.login }}
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+  POLICY_AUTHORITY: ${{ inputs.authority }}
+  POLICY_HARNESS: ${{ inputs.harness }}
+  POLICY_MODEL: ${{ inputs.model }}
+  POLICY_BLOCK_AT_SEVERITY: ${{ inputs.block-at-severity }}
+  POLICY_NEVER_AUTO_APPROVE: ${{ inputs.never-auto-approve }}
+  POLICY_MAX_CHANGED_LINES: ${{ inputs.max-changed-lines }}
 
 jobs:
   start:

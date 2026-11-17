@@ -27,17 +27,20 @@ findings as a PR review. Repositories call the reusable workflow in
   uploaded as an artifact. Codex can run read-only shell commands in a job whose environment holds
   Actions tokens; this catches a token printed verbatim, not an encoded one.
 - [`publish.ts`](steps/publish.ts) validates the agent's output and decides what to post using live
-  PR state and [`policy.ts`](src/policy.ts). The agent can't choose the review event.
+  PR state and the repository's policy. The agent can't choose the review event.
 
 ## Policy
 
-[`policy.ts`](src/policy.ts) sets each repository's `authority`:
+Each repository sets its policy as inputs in its caller workflow. That workflow runs from the
+default branch, so a PR can't change the policy it's reviewed under. `authority` decides what the
+bot may do:
 
-- `advisory`: always posts a comment, including the decision it would have made.
-- `block`: requests changes for findings at or above `blockAtSeverity`.
+- `advisory` (the default): always posts a comment, including the decision it would have made.
+- `block`: requests changes for findings at or above `block-at-severity`.
 - `approve`: also approves when every condition in [`decide.ts`](src/decide.ts) holds.
 
-Repositories without an entry get the advisory defaults.
+[`policy.ts`](src/policy.ts) holds what every repository shares: the paths that always need a human
+approval, which `never-auto-approve` adds to, and the minimum author role for approval.
 
 ## Adding a repository
 
@@ -74,6 +77,12 @@ Repositories without an entry get the advisory defaults.
        uses: marimo-team/.github/.github/workflows/agent-review.yml@<sha>
        with:
          policy-ref: <sha>
+         # Optional, with their defaults:
+         # authority: advisory
+         # harness: claude
+         # block-at-severity: high
+         # max-changed-lines: 400
+         # never-auto-approve: "" # extra globs, one per line
    ```
 
 5. Optionally, add review instructions in `REVIEW.md` at the repository root, the same file

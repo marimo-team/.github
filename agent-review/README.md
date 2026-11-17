@@ -32,12 +32,11 @@ findings as a PR review. Repositories call the reusable workflow in
 ## Policy
 
 Each repository sets its policy as inputs in its caller workflow. That workflow runs from the
-default branch, so a PR can't change the policy it's reviewed under. `authority` decides what the
-bot may do:
+default branch, so a PR can't change the policy it's reviewed under.
 
-- `advisory` (the default): always posts a comment, including the decision it would have made.
-- `block`: requests changes for findings at or above `block-at-severity`.
-- `approve`: also approves when every condition in [`decide.ts`](src/decide.ts) holds.
+The bot requests changes for findings at or above `block-at-severity` and comments otherwise. With
+`allow-approve: true`, it also approves when every condition in [`decide.ts`](src/decide.ts) holds.
+It doesn't check CI; branch protection's required checks still gate merging.
 
 [`policy.ts`](src/policy.ts) holds what every repository shares: the paths that always need a human
 approval, which `never-auto-approve` adds to, and the minimum author role for approval.
@@ -71,14 +70,12 @@ approval, which `never-auto-approve` adds to, and the minimum author role for ap
        permissions:
          contents: read
          pull-requests: read
-         checks: read
-         statuses: read
          id-token: write
        uses: marimo-team/.github/.github/workflows/agent-review.yml@<sha>
        with:
          policy-ref: <sha>
          # Optional, with their defaults:
-         # authority: advisory
+         # allow-approve: false
          # harness: claude
          # block-at-severity: high
          # max-changed-lines: 400

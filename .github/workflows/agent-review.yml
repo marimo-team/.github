@@ -6,10 +6,10 @@ on:
         description: Commit SHA in marimo-team/.github containing the review code
         required: true
         type: string
-      authority:
-        description: "advisory posts comments, block requests changes, approve can also approve"
-        type: string
-        default: advisory
+      allow-approve:
+        description: Let the bot approve; otherwise it only requests changes or comments
+        type: boolean
+        default: false
       harness:
         description: claude or codex
         type: string
@@ -51,7 +51,7 @@ env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
   REQUESTER: ${{ github.event.sender.login }}
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-  POLICY_AUTHORITY: ${{ inputs.authority }}
+  POLICY_ALLOW_APPROVE: ${{ inputs.allow-approve }}
   POLICY_HARNESS: ${{ inputs.harness }}
   POLICY_MODEL: ${{ inputs.model }}
   POLICY_BLOCK_AT_SEVERITY: ${{ inputs.block-at-severity }}
@@ -316,8 +316,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-      checks: read
-      statuses: read
       id-token: write # Doppler OIDC
     steps:
       - name: Check out review code

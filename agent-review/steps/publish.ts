@@ -5,13 +5,7 @@ import {
   runMain,
   warning,
 } from "../src/actions.ts";
-import {
-  combineCi,
-  evaluate,
-  type PullState,
-  reviewEvent,
-  supersededReviews,
-} from "../src/decide.ts";
+import { evaluate, type PullState, reviewEvent, supersededReviews } from "../src/decide.ts";
 import { anchorFindings } from "../src/diff.ts";
 import { comparisonFileLimit, GitHubClient, GitHubError } from "../src/github.ts";
 import { findingComment, progressBody, reviewBody, type RunInfo } from "../src/messages.ts";
@@ -75,11 +69,9 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
   }
   const { result, rejected } = await readVerifiedResult();
 
-  const [pull, comparison, checkRuns, status, earlierReviews] = await Promise.all([
+  const [pull, comparison, earlierReviews] = await Promise.all([
     reader.pull(number),
     reader.compare(baseSha, run.headSha),
-    reader.checkRuns(run.headSha),
-    reader.combinedStatus(run.headSha),
     reader.reviews(number),
   ]);
   if (pull.state !== "open") {
@@ -89,7 +81,6 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
   const files = comparison.files ?? [];
   const state: PullState = {
     open: true,
-    draft: pull.draft,
     headSha: pull.head.sha,
     authorRole: await reader.role(pull.user.login),
     files: files.map((file) => ({
@@ -98,14 +89,9 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
       changes: file.changes,
     })),
     filesTruncated: files.length >= comparisonFileLimit,
-    ci: combineCi(
-      checkRuns,
-      { state: status.state, totalCount: status.total_count },
-      requireEnv("GITHUB_RUN_ID"),
-    ),
   };
   const verdict = evaluate(result, run.headSha, state, policy);
-  const event = reviewEvent(verdict, policy.authority);
+  const event = reviewEvent(verdict, policy.allowApprove);
 
   const patches = new Map<string, string>();
   for (const file of files) {
@@ -129,7 +115,6 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
         result,
         verdict,
         event,
-        authority: policy.authority,
         unanchored,
         notes,
       }),
@@ -156,7 +141,6 @@ async function publish({ policy, number, baseSha, run, reader, writer }: Context
       result,
       verdict,
       event,
-      authority: policy.authority,
       reviewedHeadSha: run.headSha,
       pull: state,
     },

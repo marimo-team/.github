@@ -17,7 +17,7 @@ export function runInfoFromEnv(): RunInfo {
 export function policyFromEnv(): RepoPolicy {
   const input = (name: string) => Deno.env.get(`POLICY_${name}`) ?? "";
   return parsePolicy({
-    authority: input("AUTHORITY"),
+    allowApprove: input("ALLOW_APPROVE"),
     harness: input("HARNESS"),
     model: input("MODEL"),
     blockAtSeverity: input("BLOCK_AT_SEVERITY"),

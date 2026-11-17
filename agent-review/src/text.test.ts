@@ -58,17 +58,16 @@ Deno.test("review body distinguishes proposed from enforced decisions", () => {
   const options = { run, result, unanchored: [], notes: [] };
   const verdict = { kind: "comment" as const, reasons: ["Changes `![x](https://evil.test)`."] };
 
-  const advisory = reviewBody({ ...options, verdict, event: "COMMENT", authority: "advisory" });
-  assertEquals(advisory.includes("**Decision: Comment**"), true);
-  assertEquals(advisory.includes("https://evil.test") && !advisory.includes("!["), true);
+  const comment = reviewBody({ ...options, verdict, event: "COMMENT" });
+  assertEquals(comment.includes("**Decision: Comment**"), true);
+  assertEquals(comment.includes("https://evil.test") && !comment.includes("!["), true);
 
   const proposed = reviewBody({
     ...options,
     verdict: { kind: "approve" },
     event: "COMMENT",
-    authority: "advisory",
   });
-  assertEquals(proposed.includes("**Proposed decision: Approve** (not enforced"), true);
+  assertEquals(proposed.includes("**Proposed decision: Approve** (this repository doesn't"), true);
 });
 
 Deno.test("caps the review body below GitHub's limit and keeps the footer", () => {
@@ -86,7 +85,6 @@ Deno.test("caps the review body below GitHub's limit and keeps the footer", () =
     result: { outcome: "completed", summary: long, coverage: long, limitations: [], findings: [] },
     verdict: { kind: "comment", reasons: [] },
     event: "COMMENT",
-    authority: "advisory",
     unanchored: Array(30).fill(finding),
     notes: [],
   });

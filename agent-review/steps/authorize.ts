@@ -22,6 +22,8 @@ await runMain(async () => {
   await setOutput("harness", policy.reviewer.harness);
   await setOutput("model", policy.reviewer.model ?? "");
   console.log(
-    `Reviewing ${repository}#${number} with ${policy.reviewer.harness} (${policy.authority})`,
+    `Reviewing ${repository}#${number} with ${policy.reviewer.harness}${
+      policy.allowApprove ? ", approval allowed" : ""
+    }`,
   );
 });

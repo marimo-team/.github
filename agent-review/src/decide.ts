@@ -1,14 +1,6 @@
 import { matchingGlob } from "./glob.ts";
-import {
-  atLeastRole,
-  atLeastSeverity,
-  type Authority,
-  type RepoPolicy,
-  type RepositoryRole,
-} from "./policy.ts";
+import { atLeastRole, atLeastSeverity, type RepoPolicy, type RepositoryRole } from "./policy.ts";
 import type { Finding, ReviewResult } from "./result.ts";
-
-export type CiStatus = "success" | "pending" | "failure" | "missing";
 
 export interface ChangedFile {
   readonly path: string;
@@ -19,12 +11,10 @@ export interface ChangedFile {
 /** Live state fetched at publication time, never from the reviewer. */
 export interface PullState {
   readonly open: boolean;
-  readonly draft: boolean;
   readonly headSha: string;
   readonly authorRole: RepositoryRole;
   readonly files: readonly ChangedFile[];
   readonly filesTruncated: boolean;
-  readonly ci: CiStatus;
 }
 
 export type Verdict =
@@ -56,9 +46,7 @@ function approvalBlockers(
   if (notable.length) reasons.push(`${notable.length} finding(s) at medium severity or above.`);
 
   if (!pull.open) reasons.push("The PR is closed.");
-  if (pull.draft) reasons.push("The PR is a draft.");
   if (pull.headSha !== reviewedHeadSha) reasons.push("New commits were pushed after the review.");
-  if (pull.ci !== "success") reasons.push(`CI is ${pull.ci}.`);
 
   const touched = protectedPaths(pull.files, policy.neverAutoApprove);
   if (touched.length) {
@@ -92,10 +80,9 @@ export function evaluate(
   return reasons.length ? { kind: "comment", reasons } : { kind: "approve" };
 }
 
-export function reviewEvent(verdict: Verdict, authority: Authority): ReviewEvent {
-  if (authority === "advisory") return "COMMENT";
+export function reviewEvent(verdict: Verdict, allowApprove: boolean): ReviewEvent {
   if (verdict.kind === "request_changes") return "REQUEST_CHANGES";
-  if (verdict.kind === "approve" && authority === "approve") return "APPROVE";
+  if (verdict.kind === "approve" && allowApprove) return "APPROVE";
   return "COMMENT";
 }
 
@@ -115,14 +102,12 @@ export function supersededReviews(
     readonly result: ReviewResult;
     readonly verdict: Verdict;
     readonly event: ReviewEvent;
-    readonly authority: Authority;
     readonly reviewedHeadSha: string;
     readonly pull: PullState;
   },
 ): number[] {
-  const { result, verdict, event, authority, reviewedHeadSha, pull } = review;
-  const liftsBlocks = authority !== "advisory" &&
-    verdict.kind !== "request_changes" &&
+  const { result, verdict, event, reviewedHeadSha, pull } = review;
+  const liftsBlocks = verdict.kind !== "request_changes" &&
     result.outcome === "completed" &&
     result.limitations.length === 0 &&
     !pull.filesTruncated &&
@@ -133,46 +118,4 @@ export function supersededReviews(
       (previous.state === "CHANGES_REQUESTED" && liftsBlocks)
     )
     .map((previous) => previous.id);
-}
-
-interface CheckRun {
-  readonly status: string;
-  readonly conclusion: string | null;
-  readonly details_url: string | null;
-}
-
-interface CombinedStatus {
-  readonly state: string;
-  readonly totalCount: number;
-}
-
-const passingConclusions = new Set(["success", "neutral", "skipped"]);
-
-/**
- * This run's own jobs are check runs on the head commit too, and the publishing job
- * is still in progress, so they're left out.
- */
-export function combineCi(
-  allCheckRuns: readonly CheckRun[],
-  status: CombinedStatus,
-  ownRunId: string,
-): CiStatus {
-  const checkRuns = allCheckRuns.filter((run) =>
-    !run.details_url?.includes(`/actions/runs/${ownRunId}/`)
-  );
-  if (checkRuns.length === 0 && status.totalCount === 0) return "missing";
-
-  const completed = checkRuns.filter((run) => run.status === "completed");
-  if (
-    completed.some((run) => !passingConclusions.has(run.conclusion ?? "")) ||
-    status.state === "failure" || status.state === "error"
-  ) {
-    return "failure";
-  }
-  if (
-    completed.length < checkRuns.length || (status.totalCount > 0 && status.state === "pending")
-  ) {
-    return "pending";
-  }
-  return "success";
 }

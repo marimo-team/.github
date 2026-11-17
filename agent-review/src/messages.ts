@@ -1,5 +1,5 @@
 import type { ReviewEvent, Verdict } from "./decide.ts";
-import type { Authority, Harness } from "./policy.ts";
+import type { Harness } from "./policy.ts";
 import type { Finding, ReviewResult } from "./result.ts";
 import { sanitizeMarkdown } from "./sanitize.ts";
 
@@ -41,13 +41,13 @@ export function progressBody(run: RunInfo, status: string): string {
   return `${attribution(run)}\n\n${status}\n\n${footer(run)}`;
 }
 
-function decisionSection(verdict: Verdict, event: ReviewEvent, authority: Authority): string {
+function decisionSection(verdict: Verdict, event: ReviewEvent): string {
   const enforced = eventKinds[event] === verdict.kind;
   const heading = enforced
     ? `**Decision: ${verdictNames[verdict.kind]}**`
     : `**Proposed decision: ${
       verdictNames[verdict.kind]
-    }** (not enforced; this repository's policy is \`${authority}\`)`;
+    }** (this repository doesn't allow the bot to approve)`;
   // Reasons can quote changed file names, which the PR author controls.
   const reasons = verdict.kind === "request_changes"
     ? verdict.blocking.map((finding) => `${finding.severity}: ${finding.title}`)
@@ -70,11 +70,10 @@ export function reviewBody(options: {
   readonly result: ReviewResult;
   readonly verdict: Verdict;
   readonly event: ReviewEvent;
-  readonly authority: Authority;
   readonly unanchored: readonly Finding[];
   readonly notes: readonly string[];
 }): string {
-  const { run, result, verdict, event, authority, unanchored, notes } = options;
+  const { run, result, verdict, event, unanchored, notes } = options;
   const limitations = result.limitations.length
     ? `\n\n**Limitations**\n${
       result.limitations.map((item) => `- ${sanitizeMarkdown(item)}`).join("\n")
@@ -82,7 +81,7 @@ export function reviewBody(options: {
     : "";
   const sections = [
     attribution(run),
-    decisionSection(verdict, event, authority),
+    decisionSection(verdict, event),
     sanitizeMarkdown(result.summary),
     `<details><summary>Coverage</summary>\n\n${
       sanitizeMarkdown(result.coverage)

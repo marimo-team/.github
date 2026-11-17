@@ -1,6 +1,3 @@
-export const authorities = ["advisory", "block", "approve"] as const;
-export type Authority = (typeof authorities)[number];
-
 export const harnesses = ["claude", "codex"] as const;
 export type Harness = (typeof harnesses)[number];
 
@@ -18,7 +15,8 @@ export interface Reviewer {
 }
 
 export interface RepoPolicy {
-  readonly authority: Authority;
+  /** Without it, the bot only requests changes or comments. */
+  readonly allowApprove: boolean;
   readonly reviewer: Reviewer;
   /** Findings at or above this severity request changes. */
   readonly blockAtSeverity: Severity;
@@ -59,7 +57,7 @@ const alwaysNeedsHuman = [
  * branch, so a PR can't change the policy it's reviewed under.
  */
 export interface PolicyInputs {
-  readonly authority: string;
+  readonly allowApprove: string;
   readonly harness: string;
   readonly model: string;
   readonly blockAtSeverity: string;
@@ -83,7 +81,7 @@ export function parsePolicy(inputs: PolicyInputs): RepoPolicy {
   }
   const extraPaths = inputs.neverAutoApprove.split("\n").map((line) => line.trim()).filter(Boolean);
   return {
-    authority: oneOf("authority", inputs.authority, authorities),
+    allowApprove: oneOf("allow-approve", inputs.allowApprove, ["true", "false"]) === "true",
     reviewer: { harness, model: inputs.model.trim() || defaultModels[harness] },
     blockAtSeverity: oneOf("block-at-severity", inputs.blockAtSeverity, severities),
     neverAutoApprove: [...alwaysNeedsHuman, ...extraPaths],

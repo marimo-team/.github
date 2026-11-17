@@ -11,7 +11,6 @@ export class GitHubError extends Error {
 
 export interface PullRequest {
   readonly state: "open" | "closed";
-  readonly draft: boolean;
   readonly title: string;
   readonly body: string | null;
   readonly user: { readonly login: string };
@@ -48,17 +47,6 @@ export interface PullReview {
   readonly id: number;
   readonly user: { readonly login: string } | null;
   readonly state: string;
-}
-
-export interface CheckRun {
-  readonly status: string;
-  readonly conclusion: string | null;
-  readonly details_url: string | null;
-}
-
-export interface CombinedStatus {
-  readonly state: string;
-  readonly total_count: number;
 }
 
 export interface NewReviewComment {
@@ -152,21 +140,6 @@ export class GitHubClient {
 
   reviews(number: number): Promise<PullReview[]> {
     return this.paginate(`${this.repo}/pulls/${number}/reviews`);
-  }
-
-  async checkRuns(sha: string): Promise<CheckRun[]> {
-    const runs: CheckRun[] = [];
-    for (let page = 1;; page++) {
-      const { total_count, check_runs } = await this.json<
-        { total_count: number; check_runs: CheckRun[] }
-      >("GET", `${this.repo}/commits/${sha}/check-runs?per_page=100&page=${page}`);
-      runs.push(...check_runs);
-      if (runs.length >= total_count || check_runs.length === 0) return runs;
-    }
-  }
-
-  combinedStatus(sha: string): Promise<CombinedStatus> {
-    return this.json("GET", `${this.repo}/commits/${sha}/status`);
   }
 
   createReview(

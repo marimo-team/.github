@@ -2,7 +2,7 @@ import { deepEqual as assertEquals, throws as assertThrows } from "node:assert/s
 import { parsePolicy, type PolicyInputs } from "./policy.ts";
 
 const inputs: PolicyInputs = {
-  authority: "advisory",
+  allowApprove: "false",
   harness: "claude",
   model: "",
   blockAtSeverity: "high",
@@ -27,7 +27,7 @@ Deno.test("adds a repository's paths to the defaults rather than replacing them"
 });
 
 Deno.test("rejects invalid inputs", () => {
-  assertThrows(() => parsePolicy({ ...inputs, authority: "merge" }), /authority/);
+  assertThrows(() => parsePolicy({ ...inputs, allowApprove: "yes" }), /allow-approve/);
   assertThrows(() => parsePolicy({ ...inputs, harness: "" }), /harness/);
   assertThrows(() => parsePolicy({ ...inputs, blockAtSeverity: "High" }), /block-at-severity/);
   assertThrows(() => parsePolicy({ ...inputs, maxChangedLines: "1.5" }), /max-changed-lines/);

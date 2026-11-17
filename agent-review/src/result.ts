@@ -1,4 +1,3 @@
-import { isRelativeRepositoryPath, maxPathLength } from "./paths.ts";
 import { severities, type Severity } from "./policy.ts";
 import { type JsonObject, type Parsed, parseJsonObject, Reader } from "./reader.ts";
 
@@ -20,6 +19,19 @@ export interface ReviewResult {
   readonly coverage: string;
   readonly limitations: readonly string[];
   readonly findings: readonly Finding[];
+}
+
+const maxPathLength = 500;
+
+export function isRelativeRepositoryPath(path: string): boolean {
+  return (
+    path.length > 0 &&
+    path.length <= maxPathLength &&
+    !path.startsWith("/") &&
+    !path.includes("\\") &&
+    !path.split("/").some((part) => part === "" || part === "." || part === "..") &&
+    !Array.from(path).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+  );
 }
 
 const limits = {

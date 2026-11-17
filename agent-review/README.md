@@ -18,9 +18,8 @@ findings as a PR review. Repositories call the reusable workflow in
   `dontAsk` mode; Codex runs in its read-only sandbox.
 - The workspace root is the base branch. The PR head is checked out under `pr-head/` as files to
   read, and nothing executes it.
-- The instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`. The agent is
-  also pointed at the base branch's `AGENTS.md` and `CLAUDE.md` files for the changed paths. The PR
-  can't change the instructions it's reviewed under.
+- The instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`, `AGENTS.md`,
+  and `CLAUDE.md`. The PR can't change the instructions it's reviewed under.
 - The bot key's Doppler identity trusts only OIDC tokens whose subject names the `agent-review-bot`
   environment, which only `start` and `publish` run in. The agent jobs run outside it, so a token an
   agent obtained couldn't fetch the bot key.

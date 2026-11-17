@@ -6,9 +6,8 @@ import {
   setOutput,
   warning,
 } from "../src/actions.ts";
-import { type ComparedFile, comparisonFileLimit, GitHubClient } from "../src/github.ts";
+import { comparisonFileLimit, GitHubClient } from "../src/github.ts";
 import { claudeArgs } from "../src/harness.ts";
-import { instructionFileCandidates } from "../src/paths.ts";
 import { botLogin } from "../src/policy.ts";
 import { renderPrompt } from "../src/prompt.ts";
 import { parseReviewResult, reviewResultSchema } from "../src/result.ts";
@@ -37,23 +36,8 @@ async function readOptional(path: string): Promise<string | undefined> {
   }
 }
 
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await Deno.stat(path)).isFile;
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return false;
-    throw error;
-  }
-}
-
 function readTemplate(name: string): Promise<string> {
   return Deno.readTextFile(new URL(`../prompts/${name}`, import.meta.url));
-}
-
-function changedPaths(files: readonly ComparedFile[]): string[] {
-  return files.flatMap((file) =>
-    file.previous_filename ? [file.filename, file.previous_filename] : [file.filename]
-  );
 }
 
 /** Numbers the reviewer's findings so the verifier can answer for each one. */
@@ -139,15 +123,11 @@ await runMain(async () => {
   );
   if (pass === "verify") await writeCandidates(`${workspace}/${contextDir}/candidates.json`);
 
-  const projectFiles: string[] = [];
-  for (const candidate of instructionFileCandidates(changedPaths(files), [headDir, workDir])) {
-    if (await isFile(`${workspace}/${candidate}`)) projectFiles.push(candidate);
-  }
   const { template, schema } = passes[pass];
   const prompt = renderPrompt(
     [await readTemplate(template), await readTemplate("shared.md")],
     { repository, number, headSha, headDir, contextDir },
-    { reviewGuide: await readOptional(`${workspace}/REVIEW.md`), projectFiles },
+    await readOptional(`${workspace}/REVIEW.md`),
   );
   await Deno.writeTextFile(`${workspace}/${workDir}/prompt.md`, prompt);
   await Deno.writeTextFile(`${workspace}/${workDir}/schema.json`, JSON.stringify(schema));

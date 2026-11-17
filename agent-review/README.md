@@ -23,6 +23,9 @@ findings as a PR review. Repositories call the reusable workflow in
 - The bot key's Doppler identity trusts only OIDC tokens whose subject names the `agent-review-bot`
   environment, which only `start` and `publish` run in. The agent jobs run outside it, so a token an
   agent obtained couldn't fetch the bot key.
+- The agent's output is discarded if it contains anything shaped like a credential, before it's
+  uploaded as an artifact. Codex can run read-only shell commands in a job whose environment holds
+  Actions tokens; this catches a token printed verbatim, not an encoded one.
 - [`publish.ts`](steps/publish.ts) validates the agent's output and decides what to post using live
   PR state and [`policy.ts`](src/policy.ts). The agent can't choose the review event.
 
@@ -38,11 +41,16 @@ Repositories without an entry get the advisory defaults.
 
 ## Adding a repository
 
-1. Install `marimo-oss-bot` on the repository and create the `agent-review` label. Add
-   `repo:marimo-team/<repository>:environment:agent-review-bot` to the subjects the publish Doppler
-   identity accepts. GitHub creates the environment on the first run; restricting its deployment
-   branches to the default branch is a further safeguard.
-2. Add a caller workflow:
+1. Install `marimo-oss-bot` on the repository and create the `agent-review` label.
+2. Create the `agent-review-bot` environment and restrict its deployment branches to the default
+   branch. Otherwise anyone with write access could push a branch whose workflow runs in the
+   environment and fetches the bot key. Review jobs still qualify, because `pull_request_target`
+   runs on the default branch.
+3. Add `repo:marimo-team/<repository>:environment:agent-review-bot` to the subjects the publish
+   Doppler identity accepts. On both Doppler identities, also require the `job_workflow_ref` claim
+   to match `marimo-team/.github/.github/workflows/agent-review.yml@*`, so no other workflow in the
+   repository can fetch these credentials.
+4. Add a caller workflow:
 
    ```yaml
    name: Agent Review
@@ -68,7 +76,7 @@ Repositories without an entry get the advisory defaults.
          policy-ref: <sha>
    ```
 
-3. Optionally, add review instructions in `REVIEW.md` at the repository root, the same file
+5. Optionally, add review instructions in `REVIEW.md` at the repository root, the same file
    Anthropic's managed Code Review reads.
 
 ## Development

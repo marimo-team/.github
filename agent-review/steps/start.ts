@@ -1,7 +1,13 @@
-import { requireEnv, requirePositiveInteger, runMain, setOutput, warning } from "../src/actions.ts";
+import {
+  requireEnv,
+  requirePositiveInteger,
+  runInfoFromEnv,
+  runMain,
+  setOutput,
+  warning,
+} from "../src/actions.ts";
 import { GitHubClient } from "../src/github.ts";
 import { progressBody } from "../src/messages.ts";
-import { runInfoFromEnv } from "./run-info.ts";
 
 await runMain(async () => {
   const number = requirePositiveInteger("PR_NUMBER");

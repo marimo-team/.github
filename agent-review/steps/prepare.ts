@@ -1,4 +1,5 @@
 import {
+  policyFromEnv,
   requireEnv,
   requirePositiveInteger,
   requireSha,
@@ -12,7 +13,6 @@ import { botLogin } from "../src/policy.ts";
 import { renderPrompt } from "../src/prompt.ts";
 import { parseReviewResult, reviewResultSchema } from "../src/result.ts";
 import { verificationSchema } from "../src/verification.ts";
-import { policyFromEnv } from "./run-info.ts";
 
 const maxDiffBytes = 1_500_000;
 

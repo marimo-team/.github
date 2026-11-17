@@ -1,7 +1,9 @@
 import {
+  policyFromEnv,
   requireEnv,
   requirePositiveInteger,
   requireSha,
+  runInfoFromEnv,
   runMain,
   warning,
 } from "../src/actions.ts";
@@ -13,7 +15,6 @@ import { botLogin, type RepoPolicy, reviewLabel } from "../src/policy.ts";
 import type { Parsed } from "../src/reader.ts";
 import { parseReviewResult, type ReviewResult } from "../src/result.ts";
 import { applyVerification, parseVerification } from "../src/verification.ts";
-import { policyFromEnv, runInfoFromEnv } from "./run-info.ts";
 
 async function readOutput<T>(
   agent: string,

@@ -1,7 +1,6 @@
-import { requireEnv, requirePositiveInteger, runMain } from "../src/actions.ts";
+import { policyFromEnv, requireEnv, requirePositiveInteger, runMain } from "../src/actions.ts";
 import { GitHubClient } from "../src/github.ts";
 import { atLeastRole, minimumRequesterRole } from "../src/policy.ts";
-import { policyFromEnv } from "./run-info.ts";
 
 await runMain(async () => {
   const repository = requireEnv("REPOSITORY");

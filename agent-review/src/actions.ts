@@ -1,3 +1,6 @@
+import type { RunInfo } from "./messages.ts";
+import { parsePolicy, type RepoPolicy } from "./policy.ts";
+
 export function requireEnv(name: string): string {
   const value = Deno.env.get(name);
   if (!value) throw new Error(`Missing environment variable ${name}`);
@@ -38,4 +41,27 @@ export async function runMain(main: () => Promise<void>): Promise<void> {
     console.log(`::error::${error instanceof Error ? error.message : String(error)}`);
     Deno.exit(1);
   }
+}
+
+export function runInfoFromEnv(): RunInfo {
+  const { harness, model } = policyFromEnv().reviewer;
+  return {
+    harness,
+    model,
+    requester: requireEnv("REQUESTER"),
+    runUrl: requireEnv("RUN_URL"),
+    headSha: requireSha("HEAD_SHA"),
+  };
+}
+
+export function policyFromEnv(): RepoPolicy {
+  const input = (name: string) => Deno.env.get(`POLICY_${name}`) ?? "";
+  return parsePolicy({
+    allowApprove: input("ALLOW_APPROVE"),
+    harness: input("HARNESS"),
+    model: input("MODEL"),
+    blockAtSeverity: input("BLOCK_AT_SEVERITY"),
+    neverAutoApprove: input("NEVER_AUTO_APPROVE"),
+    maxChangedLines: input("MAX_CHANGED_LINES"),
+  });
 }

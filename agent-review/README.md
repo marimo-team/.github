@@ -21,6 +21,9 @@ findings as a PR review. Repositories call the reusable workflow in
 - The instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`. The agent is
   also pointed at the base branch's `AGENTS.md` and `CLAUDE.md` files for the changed paths. The PR
   can't change the instructions it's reviewed under.
+- The bot key's Doppler identity trusts only OIDC tokens whose subject names the `agent-review-bot`
+  environment, which only `start` and `publish` run in. The agent jobs run outside it, so a token an
+  agent obtained couldn't fetch the bot key.
 - [`publish.ts`](steps/publish.ts) validates the agent's output and decides what to post using live
   PR state and [`policy.ts`](src/policy.ts). The agent can't choose the review event.
 
@@ -36,7 +39,10 @@ Repositories without an entry get the advisory defaults.
 
 ## Adding a repository
 
-1. Install `marimo-oss-bot` on the repository and create the `agent-review` label.
+1. Install `marimo-oss-bot` on the repository and create the `agent-review` label. Add
+   `repo:marimo-team/<repository>:environment:agent-review-bot` to the subjects the publish Doppler
+   identity accepts. GitHub creates the environment on the first run; restricting its deployment
+   branches to the default branch is a further safeguard.
 2. Add a caller workflow:
 
    ```yaml

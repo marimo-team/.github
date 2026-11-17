@@ -64,5 +64,6 @@ runs:
         output-schema-file: ${{ inputs.schema-file }}
         output-file: ${{ inputs.output-file }}
         model: ${{ inputs.model }}
+        codex-version: 0.166.0
         sandbox: read-only
         safety-strategy: drop-sudo

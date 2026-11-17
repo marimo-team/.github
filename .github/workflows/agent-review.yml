@@ -37,6 +37,12 @@ jobs:
       github.event.action == 'labeled' &&
       github.event.label.name == 'agent-review'
     runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
+    # GitHub's OIDC tokens are the same for every job in a run, except for the
+    # environment. The bot's Doppler identity trusts only this environment's subject,
+    # so the agent jobs can't fetch the bot key even if an agent obtains a token.
+    environment:
+      name: agent-review-bot
+      deployment: false
     timeout-minutes: 5
     permissions:
       contents: read
@@ -61,7 +67,7 @@ jobs:
           persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: v2.9.8
       - name: Authorize
         id: authorize
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
@@ -84,8 +90,7 @@ jobs:
           private-key: ${{ steps.bot-secrets.outputs.GITHUB_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-          permission-issues: write
-          permission-pull-requests: write
+          permission-issues: write # the progress comment and reaction
       - name: Post progress comment
         id: progress
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
@@ -130,7 +135,7 @@ jobs:
           persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: v2.9.8
       - name: Prepare review
         id: prepare
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
@@ -213,7 +218,7 @@ jobs:
           persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: v2.9.8
       - name: Download review result
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -265,6 +270,9 @@ jobs:
     needs: [start, review, verify]
     if: always() && needs.start.result == 'success'
     runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
+    environment:
+      name: agent-review-bot
+      deployment: false
     timeout-minutes: 5
     permissions:
       contents: read
@@ -283,7 +291,7 @@ jobs:
           persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: v2.9.8
       - name: Download result
         if: needs.review.result == 'success'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

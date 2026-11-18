@@ -19,8 +19,8 @@ findings as a PR review. Repositories call the reusable workflow in
   network. No workflow step executes the PR head, which is checked out under `pr-head/`.
 - Instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`, `AGENTS.md`, and
   `CLAUDE.md`, so the PR can't change them.
-- `start` and `publish` run in the `agent-review-bot` environment, the only one that can fetch the
-  bot key. `review` and `verify` run in `agent-review`, the only one that can fetch model keys.
+- `start` and `publish` run in the `agent-bot` environment, the only one that can fetch the bot
+  key. `review` and `verify` run in `agent`, the only one that can fetch model keys.
 - Output containing anything shaped like a credential is discarded before upload. It catches tokens
   printed verbatim, not encoded ones.
 - [`publish.ts`](steps/publish.ts) picks the review event from live PR state and the repository's
@@ -38,13 +38,13 @@ paths that always need a human.
 ## Adding a repository
 
 1. Install `marimo-oss-bot` and create the `agent-review` label.
-2. Create the `agent-review` and `agent-review-bot` environments and restrict both to the default
+2. Create the `agent` and `agent-bot` environments and restrict both to the default
    branch, before Doppler trusts them. Otherwise a workflow on another branch could create or use
    them and fetch the keys.
-3. In Doppler, add `repo:marimo-team/<repository>:environment:agent-review` to the review identity's
-   subjects and `…:environment:agent-review-bot` to the publish identity's. On both, also require
+3. In Doppler, add `repo:marimo-team/<repository>:environment:agent` to the agent identity's
+   subjects and `…:environment:agent-bot` to the bot identity's. On both, also require
    `repository_owner` `marimo-team`, `ref` `refs/heads/<default branch>`, and `job_workflow_ref`
-   `marimo-team/.github/.github/workflows/agent-review.yml@*`.
+   `marimo-team/.github/.github/workflows/agent-*.yml@*`.
 4. Add a caller workflow:
 
    ```yaml

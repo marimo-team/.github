@@ -37,10 +37,10 @@ env:
   # Each job's Doppler config holds only the credentials that job needs: the agent
   # jobs never see the bot's private key, and the publishing jobs never see model keys.
   DOPPLER_PROJECT: marimo-oss-bot
-  DOPPLER_REVIEW_CONFIG: ci_review
-  DOPPLER_REVIEW_IDENTITY: TODO-doppler-review-identity-id
-  DOPPLER_PUBLISH_CONFIG: ci_publish
-  DOPPLER_PUBLISH_IDENTITY: TODO-doppler-publish-identity-id
+  DOPPLER_AGENT_CONFIG: ci_agent
+  DOPPLER_AGENT_IDENTITY: TODO-doppler-agent-identity-id
+  DOPPLER_BOT_CONFIG: ci_bot
+  DOPPLER_BOT_IDENTITY: TODO-doppler-bot-identity-id
   BOT_CLIENT_ID: Iv23lisN9yMRNSc7wovY # marimo-oss-bot (App ID 3225607)
   WORK_DIR: _agent_review
   CENTRAL_DIR: _agent_review/central
@@ -72,7 +72,7 @@ jobs:
     # so the agent jobs can't fetch the bot key even if an agent obtains a token.
     # Both environments allow only the default branch, so branch workflows can't use them.
     environment:
-      name: agent-review-bot
+      name: agent-bot
       deployment: false
     timeout-minutes: 5
     permissions:
@@ -108,9 +108,9 @@ jobs:
         uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
         with:
           auth-method: oidc
-          doppler-identity-id: ${{ env.DOPPLER_PUBLISH_IDENTITY }}
+          doppler-identity-id: ${{ env.DOPPLER_BOT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
-          doppler-config: ${{ env.DOPPLER_PUBLISH_CONFIG }}
+          doppler-config: ${{ env.DOPPLER_BOT_CONFIG }}
       - name: Mint bot token
         id: bot-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -134,7 +134,7 @@ jobs:
     timeout-minutes: 30
     # The model credentials' Doppler identity trusts only this environment's subject.
     environment:
-      name: agent-review
+      name: agent
       deployment: false
     # No write access: the agent reads untrusted PR content in this job.
     permissions:
@@ -183,9 +183,9 @@ jobs:
         uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
         with:
           auth-method: oidc
-          doppler-identity-id: ${{ env.DOPPLER_REVIEW_IDENTITY }}
+          doppler-identity-id: ${{ env.DOPPLER_AGENT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
-          doppler-config: ${{ env.DOPPLER_REVIEW_CONFIG }}
+          doppler-config: ${{ env.DOPPLER_AGENT_CONFIG }}
       # The checkout above is policy-ref. `$/` would avoid the checkout, but actionlint
       # doesn't support it yet (rhysd/actionlint#711). A local path can't use env.
       - name: Review
@@ -226,7 +226,7 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
     timeout-minutes: 20
     environment:
-      name: agent-review
+      name: agent
       deployment: false
     permissions:
       contents: read
@@ -277,9 +277,9 @@ jobs:
         uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
         with:
           auth-method: oidc
-          doppler-identity-id: ${{ env.DOPPLER_REVIEW_IDENTITY }}
+          doppler-identity-id: ${{ env.DOPPLER_AGENT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
-          doppler-config: ${{ env.DOPPLER_REVIEW_CONFIG }}
+          doppler-config: ${{ env.DOPPLER_AGENT_CONFIG }}
       - name: Verify
         uses: ./_agent_review/central/agent-review/run-agent # zizmor: ignore[self-repository]
         with:
@@ -315,7 +315,7 @@ jobs:
     if: always() && needs.start.result == 'success'
     runs-on: ${{ vars.CI_RUNNER_SMALL || (github.event.repository.private && 'ubuntu-small' || 'ubuntu-p-small') }}
     environment:
-      name: agent-review-bot
+      name: agent-bot
       deployment: false
     timeout-minutes: 5
     permissions:
@@ -351,9 +351,9 @@ jobs:
         uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
         with:
           auth-method: oidc
-          doppler-identity-id: ${{ env.DOPPLER_PUBLISH_IDENTITY }}
+          doppler-identity-id: ${{ env.DOPPLER_BOT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
-          doppler-config: ${{ env.DOPPLER_PUBLISH_CONFIG }}
+          doppler-config: ${{ env.DOPPLER_BOT_CONFIG }}
       - name: Mint bot token
         id: bot-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

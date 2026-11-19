@@ -1,0 +1,90 @@
+name: Run review agent
+description: Runs Claude Code or Codex with read-only access and writes its structured output to a file.
+inputs:
+  harness:
+    description: claude or codex
+    required: true
+  model:
+    description: Model to run; the harness default when empty
+    required: false
+    default: ""
+  prompt:
+    description: The rendered prompt
+    required: true
+  claude-args:
+    description: Claude Code arguments, including the output schema
+    required: true
+  schema-file:
+    description: Output schema file, for Codex
+    required: true
+  output-file:
+    description: Where to write the agent's structured output
+    required: true
+  claude-code-oauth-token:
+    description: Claude Code credentials
+    required: false
+    default: ""
+  openai-api-key:
+    description: Codex credentials
+    required: false
+    default: ""
+  logfire-token:
+    description: Logfire write token for Claude Code's telemetry; none is exported when empty
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Run Claude Code
+      id: claude
+      if: inputs.harness == 'claude'
+      uses: anthropics/claude-code-action@cc98b3ae241b0fcfb6a42a2690751afffecb4452 # v1.0.278
+      env:
+        # Nested CLAUDE.md files under the PR head would otherwise load as instructions.
+        CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1"
+        # The conversation goes to Logfire rather than the public job log. Claude can't
+        # read its environment, so the token stays out of the agent's reach.
+        CLAUDE_CODE_ENABLE_TELEMETRY: ${{ inputs.logfire-token != '' && '1' || '0' }}
+        CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1"
+        OTEL_LOGS_EXPORTER: otlp
+        OTEL_TRACES_EXPORTER: otlp
+        OTEL_METRICS_EXPORTER: otlp
+        OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+        OTEL_EXPORTER_OTLP_ENDPOINT: https://logfire-us.pydantic.dev
+        OTEL_EXPORTER_OTLP_HEADERS: Authorization=${{ inputs.logfire-token }}
+        OTEL_RESOURCE_ATTRIBUTES: >-
+          service.name=agent-review,github.repository=${{ github.repository }},github.pr=${{ github.event.pull_request.number }},github.run_id=${{ github.run_id }},github.run_attempt=${{ github.run_attempt }}
+        OTEL_LOG_USER_PROMPTS: "1"
+        OTEL_LOG_ASSISTANT_RESPONSES: "1"
+        OTEL_LOG_TOOL_DETAILS: "1"
+        OTEL_LOG_TOOL_CONTENT: "1"
+      with:
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        # Without this the action exchanges the OIDC token for a Claude App token
+        # with write access.
+        github_token: ${{ github.token }}
+        prompt: ${{ inputs.prompt }}
+        claude_args: ${{ inputs.claude-args }}
+    # Read from the transcript file: an environment variable can't hold more than 128 KiB.
+    - name: Save Claude output
+      if: inputs.harness == 'claude'
+      shell: bash
+      env:
+        EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+      run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output // empty' "$EXECUTION_FILE" > "$OUTPUT_FILE"
+
+    # Codex drops sudo irreversibly and refuses to run again in the same job, so a job
+    # can use this action only once.
+    - name: Run Codex
+      if: inputs.harness == 'codex'
+      uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
+      with:
+        openai-api-key: ${{ inputs.openai-api-key }}
+        prompt: ${{ inputs.prompt }}
+        output-schema-file: ${{ inputs.schema-file }}
+        output-file: ${{ inputs.output-file }}
+        model: ${{ inputs.model }}
+        codex-version: 0.166.0
+        sandbox: read-only
+        safety-strategy: drop-sudo

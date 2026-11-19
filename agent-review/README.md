@@ -6,11 +6,11 @@ A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews
 
 ## Trust boundaries
 
-| Job       | GitHub access                   | Credentials       | Untrusted input       |
-| --------- | ------------------------------- | ----------------- | --------------------- |
-| `start`   | read; bot token for one comment | bot key           | none                  |
-| `review`  | read only                       | model credentials | the PR, via the agent |
-| `publish` | read; bot token for the review  | bot key           | the agent's output    |
+| Job       | GitHub access                   | Credentials                      | Untrusted input       |
+| --------- | ------------------------------- | -------------------------------- | --------------------- |
+| `start`   | read; bot token for one comment | bot key                          | none                  |
+| `review`  | read only                       | model credentials, Logfire token | the PR, via the agent |
+| `publish` | read; bot token for the review  | bot key                          | the agent's output    |
 
 - Claude Code gets only `Read`, `Grep`, and `Glob`, confined to the workspace. Codex runs in its
   read-only sandbox, which can read the whole runner and run scripts, but can't write or reach the
@@ -23,6 +23,15 @@ A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews
   printed verbatim, not encoded ones.
 - [`publish.ts`](steps/publish.ts) picks the review event from live PR state and the repository's
   policy; the agent can't.
+
+## Observability
+
+When the `ci_agent` Doppler config has `LOGFIRE_TOKEN`, Claude Code exports its conversation to
+Logfire: prompts, responses, tool calls, and file contents it read, plus token and cost metrics. The
+job log stays free of it, because logs are public. Find a review by `github.repository`,
+`github.pr`, or `github.run_id`. Claude's spans aren't nested under one trace, so read a review
+through its log events, ordered by `event.sequence`. Codex doesn't export yet: its sandbox can read
+its own command line, where codex-action would put the token.
 
 ## Policy
 

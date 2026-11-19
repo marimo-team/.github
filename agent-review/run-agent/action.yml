@@ -28,6 +28,10 @@ inputs:
     description: Codex credentials
     required: false
     default: ""
+  logfire-token:
+    description: Logfire write token for Claude Code's telemetry; none is exported when empty
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -38,6 +42,22 @@ runs:
       env:
         # Nested CLAUDE.md files under the PR head would otherwise load as instructions.
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1"
+        # The conversation goes to Logfire rather than the public job log. Claude can't
+        # read its environment, so the token stays out of the agent's reach.
+        CLAUDE_CODE_ENABLE_TELEMETRY: ${{ inputs.logfire-token != '' && '1' || '0' }}
+        CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1"
+        OTEL_LOGS_EXPORTER: otlp
+        OTEL_TRACES_EXPORTER: otlp
+        OTEL_METRICS_EXPORTER: otlp
+        OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+        OTEL_EXPORTER_OTLP_ENDPOINT: https://logfire-us.pydantic.dev
+        OTEL_EXPORTER_OTLP_HEADERS: Authorization=${{ inputs.logfire-token }}
+        OTEL_RESOURCE_ATTRIBUTES: >-
+          service.name=agent-review,github.repository=${{ github.repository }},github.pr=${{ github.event.pull_request.number }},github.run_id=${{ github.run_id }},github.run_attempt=${{ github.run_attempt }}
+        OTEL_LOG_USER_PROMPTS: "1"
+        OTEL_LOG_ASSISTANT_RESPONSES: "1"
+        OTEL_LOG_TOOL_DETAILS: "1"
+        OTEL_LOG_TOOL_CONTENT: "1"
       with:
         claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
         # Without this the action exchanges the OIDC token for a Claude App token

@@ -4,6 +4,7 @@ const credentialPatterns: ReadonlyArray<readonly [string, RegExp]> = [
   ["a JSON Web Token", /\beyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]+/],
   ["an Anthropic key", /\bsk-ant-[\w-]{20,}/],
   ["an OpenAI key", /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}/],
+  ["a Logfire token", /\bpylf_v\d+_[a-z]+_[\w-]{20,}/],
   ["a private key", /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
 ];
 

@@ -196,6 +196,7 @@ jobs:
           output-file: ${{ env.WORK_DIR }}/result.json
           claude-code-oauth-token: ${{ steps.model-secrets.outputs.CLAUDE_CODE_OAUTH_TOKEN }}
           openai-api-key: ${{ steps.model-secrets.outputs.OPENAI_API_KEY }}
+          logfire-token: ${{ steps.model-secrets.outputs.LOGFIRE_TOKEN }}
       - name: Check result
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:

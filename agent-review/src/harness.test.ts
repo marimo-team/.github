@@ -1,9 +1,8 @@
 import { deepEqual as assertEquals } from "node:assert/strict";
 import { claudeArgs } from "./harness.ts";
 import { reviewResultSchema } from "./result.ts";
-import { verificationSchema } from "./verification.ts";
 
-Deno.test("schemas meet OpenAI strict-mode rules: every property required, none extra", () => {
+Deno.test("the schema meets OpenAI strict-mode rules: every property required, none extra", () => {
   const visit = (node: unknown): void => {
     if (typeof node !== "object" || node === null) return;
     const schema = node as Record<string, unknown>;
@@ -17,9 +16,8 @@ Deno.test("schemas meet OpenAI strict-mode rules: every property required, none 
     Object.values(schema).forEach(visit);
   };
   visit(reviewResultSchema);
-  visit(verificationSchema);
 });
 
-Deno.test("schemas fit in single-quoted Claude arguments", () => {
-  for (const schema of [reviewResultSchema, verificationSchema]) claudeArgs(undefined, schema);
+Deno.test("the schema fits in single-quoted Claude arguments", () => {
+  claudeArgs(undefined, reviewResultSchema);
 });

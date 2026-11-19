@@ -43,15 +43,6 @@ export class Reader {
     return value;
   }
 
-  boolean(object: JsonObject, key: string, at: string): boolean {
-    const value = object[key];
-    if (typeof value !== "boolean") {
-      this.errors.push(`${at}.${key} must be a boolean`);
-      return false;
-    }
-    return value;
-  }
-
   oneOf<T extends string>(
     object: JsonObject,
     key: string,

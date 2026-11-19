@@ -11,24 +11,9 @@ import { comparisonFileLimit, GitHubClient } from "../src/github.ts";
 import { claudeArgs } from "../src/harness.ts";
 import { botLogin } from "../src/policy.ts";
 import { renderPrompt } from "../src/prompt.ts";
-import { parseReviewResult, reviewResultSchema } from "../src/result.ts";
-import { verificationSchema } from "../src/verification.ts";
+import { reviewResultSchema } from "../src/result.ts";
 
 const maxDiffBytes = 1_500_000;
-
-const passes = {
-  review: { template: "review.md", schema: reviewResultSchema },
-  verify: { template: "verify.md", schema: verificationSchema },
-} as const;
-type Pass = keyof typeof passes;
-
-function requirePass(): Pass {
-  const pass = requireEnv("PASS");
-  if (!Object.hasOwn(passes, pass)) {
-    throw new Error(`PASS must be one of ${Object.keys(passes).join(", ")}`);
-  }
-  return pass as Pass;
-}
 
 async function readOptional(path: string): Promise<string | undefined> {
   try {
@@ -43,16 +28,7 @@ function readTemplate(name: string): Promise<string> {
   return Deno.readTextFile(new URL(`../prompts/${name}`, import.meta.url));
 }
 
-/** Numbers the reviewer's findings so the verifier can answer for each one. */
-async function writeCandidates(path: string): Promise<void> {
-  const parsed = parseReviewResult(await Deno.readTextFile(requireEnv("REVIEW_RESULT_PATH")));
-  if (!parsed.ok) throw new Error(`The review result is invalid: ${parsed.errors.join("; ")}`);
-  const candidates = parsed.value.findings.map((finding, index) => ({ index, ...finding }));
-  await Deno.writeTextFile(path, JSON.stringify(candidates, null, 2));
-}
-
 await runMain(async () => {
-  const pass = requirePass();
   const { harness, model } = policyFromEnv().reviewer;
   const repository = requireEnv("REPOSITORY");
   const number = requirePositiveInteger("PR_NUMBER");
@@ -125,11 +101,9 @@ await runMain(async () => {
       2,
     ),
   );
-  if (pass === "verify") await writeCandidates(`${workspace}/${contextDir}/candidates.json`);
-
-  const { template, schema } = passes[pass];
+  const schema = reviewResultSchema;
   const prompt = renderPrompt(
-    [await readTemplate(template), await readTemplate("shared.md")],
+    [await readTemplate("review.md"), await readTemplate("shared.md")],
     { repository, number, headSha, headDir, contextDir },
     await readOptional(`${workspace}/REVIEW.md`),
   );

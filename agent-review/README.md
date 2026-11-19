@@ -1,8 +1,7 @@
 # Agent review
 
-A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews it, a second run of
-the same agent checks each finding against the code, and `marimo-oss-bot` posts the confirmed
-findings as a PR review. Repositories call the reusable workflow in
+A maintainer adds the `agent-review` label to a PR. Claude Code or Codex reviews it, and
+`marimo-oss-bot` posts the findings as a PR review. Repositories call the reusable workflow in
 [`.github/workflows/agent-review.yml`](../.github/workflows/agent-review.yml).
 
 ## Trust boundaries
@@ -11,7 +10,6 @@ findings as a PR review. Repositories call the reusable workflow in
 | --------- | ------------------------------- | ----------------- | --------------------- |
 | `start`   | read; bot token for one comment | bot key           | none                  |
 | `review`  | read only                       | model credentials | the PR, via the agent |
-| `verify`  | read only                       | model credentials | the PR, via the agent |
 | `publish` | read; bot token for the review  | bot key           | the agent's output    |
 
 - Claude Code gets only `Read`, `Grep`, and `Glob`, confined to the workspace. Codex runs in its
@@ -20,7 +18,7 @@ findings as a PR review. Repositories call the reusable workflow in
 - Instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`, `AGENTS.md`, and
   `CLAUDE.md`, so the PR can't change them.
 - `start` and `publish` run in the `agent-bot` environment, the only one that can fetch the bot key.
-  `review` and `verify` run in `agent`, the only one that can fetch model keys.
+  `review` runs in `agent`, the only one that can fetch model keys.
 - Output containing anything shaped like a credential is discarded before upload. It catches tokens
   printed verbatim, not encoded ones.
 - [`publish.ts`](steps/publish.ts) picks the review event from live PR state and the repository's

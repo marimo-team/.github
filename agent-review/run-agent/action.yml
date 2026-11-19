@@ -54,8 +54,8 @@ runs:
         OUTPUT_FILE: ${{ inputs.output-file }}
       run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output // empty' "$EXECUTION_FILE" > "$OUTPUT_FILE"
 
-    # Codex drops sudo irreversibly and refuses to run again in the same job, so each
-    # pass that uses this action runs in its own job.
+    # Codex drops sudo irreversibly and refuses to run again in the same job, so a job
+    # can use this action only once.
     - name: Run Codex
       if: inputs.harness == 'codex'
       uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14

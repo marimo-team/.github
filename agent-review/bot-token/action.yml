@@ -1,0 +1,46 @@
+name: Mint bot token
+description: >-
+  Fetches marimo-oss-bot's private key from Doppler over OIDC and mints an installation
+  token for the current repository. Only jobs in the agent-bot environment can fetch the key.
+inputs:
+  doppler-identity:
+    description: Doppler identity that trusts the agent-bot environment
+    required: true
+  doppler-project:
+    description: Doppler project holding the key
+    required: true
+  doppler-config:
+    description: Doppler config holding GITHUB_APP_PRIVATE_KEY
+    required: true
+  client-id:
+    description: The GitHub App's client ID
+    required: true
+  pull-requests:
+    description: Pull requests permission, such as write; none when empty
+    required: false
+    default: ""
+outputs:
+  token:
+    description: The installation token, with issues write and the requested pull requests access
+    value: ${{ steps.token.outputs.token }}
+runs:
+  using: composite
+  steps:
+    - name: Fetch bot credentials
+      id: secrets
+      uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
+      with:
+        auth-method: oidc
+        doppler-identity-id: ${{ inputs.doppler-identity }}
+        doppler-project: ${{ inputs.doppler-project }}
+        doppler-config: ${{ inputs.doppler-config }}
+    - name: Mint bot token
+      id: token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        client-id: ${{ inputs.client-id }}
+        private-key: ${{ steps.secrets.outputs.GITHUB_APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-issues: write # the progress comment, reaction and label
+        permission-pull-requests: ${{ inputs.pull-requests }}

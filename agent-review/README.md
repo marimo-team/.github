@@ -63,9 +63,15 @@ paths that always need a human.
    Doppler trusts them. Otherwise a workflow on another branch could create or use them and fetch
    the keys.
 3. In Doppler, add `repo:marimo-team/<repository>:environment:agent` to the agent identity's
-   subjects and `…:environment:agent-bot` to the bot identity's. On both, also require
-   `repository_owner` `marimo-team`, `ref` `refs/heads/<default branch>`, and `job_workflow_ref`
-   `marimo-team/.github/.github/workflows/agent-*.yml@*`.
+   subjects and `…:environment:agent-bot` to the bot identity's. Repositories created, renamed, or
+   transferred after July 15, 2026 have IDs in the subject
+   (`repo:marimo-team@<id>/<repository>@<id>:…`), so copy it from the repository's OIDC settings
+   preview. On both identities, also require `repository_owner` `marimo-team`, `ref`
+   `refs/heads/<default branch>`, and `job_workflow_ref`
+   `marimo-team/.github/.github/workflows/agent-*.yml@*`. Doppler doesn't document wildcard
+   matching, so check it once per identity: a review fetches its keys with this value, and fails
+   with `…/workflows/other-*.yml@*`. If the wildcard doesn't match, drop `job_workflow_ref`: the
+   value ends in the caller's pinned SHA, so an exact value breaks on every bump.
 4. Add a caller workflow:
 
    ```yaml

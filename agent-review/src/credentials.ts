@@ -5,6 +5,8 @@ const credentialPatterns: ReadonlyArray<readonly [string, RegExp]> = [
   ["an Anthropic key", /\bsk-ant-[\w-]{20,}/],
   ["an OpenAI key", /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}/],
   ["a Logfire token", /\bpylf_v\d+_[a-z]+_[\w-]{20,}/],
+  ["a Grafana token", /\bglc_[A-Za-z0-9+/]{32,}/],
+  ["a Grafana token", /\bglsa_[A-Za-z0-9]{32}_[0-9a-f]{8}\b/],
   ["a private key", /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
 ];
 

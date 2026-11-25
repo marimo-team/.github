@@ -9,6 +9,8 @@ Deno.test("finds credentials printed verbatim", () => {
   assertEquals(findCredential(`sk-ant-oat01-${"x".repeat(40)}`), "an Anthropic key");
   assertEquals(findCredential(`sk-proj-${"x".repeat(48)}`), "an OpenAI key");
   assertEquals(findCredential(`pylf_v1_us_${"Ab3".repeat(15)}`), "a Logfire token");
+  assertEquals(findCredential(`glc_eyJvIjoi${"Ab3+".repeat(10)}`), "a Grafana token");
+  assertEquals(findCredential(`glsa_${"Ab3d".repeat(8)}_0123abcd`), "a Grafana token");
   assertEquals(findCredential("-----BEGIN RSA PRIVATE KEY-----"), "a private key");
 });
 
@@ -20,6 +22,7 @@ Deno.test("ignores ordinary review text", () => {
       "Use scikit-learn's sk-learn style naming; see task-ask-ant-colony.",
       "-----BEGIN PUBLIC KEY-----",
       "Logfire tokens look like pylf_v1_us_...",
+      "Grafana access policy tokens start with glc_ and service accounts with glsa_.",
     ]
   ) {
     assertEquals(findCredential(text), undefined, text);

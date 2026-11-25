@@ -1,6 +1,3 @@
-import type { RunInfo } from "./messages.ts";
-import { parsePolicy, type RepoPolicy } from "./policy.ts";
-
 export function requireEnv(name: string): string {
   const value = Deno.env.get(name);
   if (!value) throw new Error(`Missing environment variable ${name}`);
@@ -24,10 +21,12 @@ export async function setOutput(name: string, value: string): Promise<void> {
   await Deno.writeTextFile(
     requireEnv("GITHUB_OUTPUT"),
     `${name}<<${delimiter}\n${value}\n${delimiter}\n`,
-    {
-      append: true,
-    },
+    { append: true },
   );
+}
+
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function warning(message: string): void {
@@ -38,30 +37,7 @@ export async function runMain(main: () => Promise<void>): Promise<void> {
   try {
     await main();
   } catch (error) {
-    console.log(`::error::${error instanceof Error ? error.message : String(error)}`);
+    console.log(`::error::${errorMessage(error)}`);
     Deno.exit(1);
   }
-}
-
-export function runInfoFromEnv(): RunInfo {
-  const { harness, model } = policyFromEnv().reviewer;
-  return {
-    harness,
-    model,
-    requester: requireEnv("REQUESTER"),
-    runUrl: requireEnv("RUN_URL"),
-    headSha: requireSha("HEAD_SHA"),
-  };
-}
-
-export function policyFromEnv(): RepoPolicy {
-  const input = (name: string) => Deno.env.get(`POLICY_${name}`) ?? "";
-  return parsePolicy({
-    allowApprove: input("ALLOW_APPROVE"),
-    harness: input("HARNESS"),
-    model: input("MODEL"),
-    blockAtSeverity: input("BLOCK_AT_SEVERITY"),
-    neverAutoApprove: input("NEVER_AUTO_APPROVE"),
-    maxChangedLines: input("MAX_CHANGED_LINES"),
-  });
 }

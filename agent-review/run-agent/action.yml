@@ -1,47 +1,63 @@
 name: Run review agent
-description: Runs Claude Code or Codex with read-only access and writes its structured output to a file.
+description: >-
+  Runs the agent read-only on the workspace and writes its structured output to a file.
+  Everything about how the agent runs stays inside this action.
 inputs:
-  harness:
-    description: claude or codex
-    required: true
   model:
-    description: Model to run; the harness default when empty
-    required: false
-    default: ""
+    description: The model to run
+    required: true
   prompt:
     description: The rendered prompt
     required: true
-  claude-args:
-    description: Claude Code arguments, including the output schema
-    required: true
   schema-file:
-    description: Output schema file, for Codex
+    description: JSON schema for the agent's output
     required: true
   output-file:
     description: Where to write the agent's structured output
     required: true
   claude-code-oauth-token:
     description: Claude Code credentials
-    required: false
-    default: ""
-  openai-api-key:
-    description: Codex credentials
-    required: false
-    default: ""
+    required: true
   otlp-endpoint:
-    description: OTLP/HTTP base URL for Claude Code's telemetry; none is exported when empty
+    description: OTLP/HTTP base URL for telemetry; none is exported when empty
     required: false
     default: ""
   otlp-headers:
     description: OTLP headers as comma-separated key=value pairs, such as the backend's auth
     required: false
     default: ""
+  telemetry-attributes:
+    description: OpenTelemetry resource attributes as comma-separated key=value pairs
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
+    # `--tools` removes every built-in tool except reading. No allow rules are added:
+    # in `dontAsk` mode reads inside the workspace proceed and anything else, such as
+    # reading `/proc` for the action's environment, is denied instead of prompted.
+    # claude-code-action writes the job's token into the workspace's `.git/config`, so
+    # reads of `.git` are denied. `--strict-mcp-config` ignores the repository's MCP servers.
+    - name: Build Claude arguments
+      id: args
+      shell: bash
+      env:
+        MODEL: ${{ inputs.model }}
+        SCHEMA_FILE: ${{ inputs.schema-file }}
+      run: |
+        schema=$(jq -c . "$SCHEMA_FILE")
+        # The action parses claude_args with shell-quote; the schema is single-quoted.
+        if [[ $schema == *"'"* ]]; then
+          echo "::error::The output schema can't contain single quotes"
+          exit 1
+        fi
+        args="--model $MODEL --tools Read,Grep,Glob --disallowedTools 'Read(**/.git/**)'"
+        args+=" --permission-mode dontAsk --strict-mcp-config --max-turns 100"
+        args+=" --json-schema '$schema'"
+        delimiter="EOF_$(openssl rand -hex 16)"
+        printf 'value<<%s\n%s\n%s\n' "$delimiter" "$args" "$delimiter" >> "$GITHUB_OUTPUT"
     - name: Run Claude Code
       id: claude
-      if: inputs.harness == 'claude'
       uses: anthropics/claude-code-action@cc98b3ae241b0fcfb6a42a2690751afffecb4452 # v1.0.278
       env:
         # Nested CLAUDE.md files under the PR head would otherwise load as instructions.
@@ -56,8 +72,7 @@ runs:
         OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
         OTEL_EXPORTER_OTLP_ENDPOINT: ${{ inputs.otlp-endpoint }}
         OTEL_EXPORTER_OTLP_HEADERS: ${{ inputs.otlp-headers }}
-        OTEL_RESOURCE_ATTRIBUTES: >-
-          service.name=agent-review,github.repository=${{ github.repository }},github.pr=${{ github.event.pull_request.number }},github.run_id=${{ github.run_id }},github.run_attempt=${{ github.run_attempt }}
+        OTEL_RESOURCE_ATTRIBUTES: ${{ inputs.telemetry-attributes }}
         OTEL_LOG_USER_PROMPTS: "1"
         OTEL_LOG_ASSISTANT_RESPONSES: "1"
         OTEL_LOG_TOOL_DETAILS: "1"
@@ -68,27 +83,11 @@ runs:
         # with write access.
         github_token: ${{ github.token }}
         prompt: ${{ inputs.prompt }}
-        claude_args: ${{ inputs.claude-args }}
+        claude_args: ${{ steps.args.outputs.value }}
     # Read from the transcript file: an environment variable can't hold more than 128 KiB.
-    - name: Save Claude output
-      if: inputs.harness == 'claude'
+    - name: Save output
       shell: bash
       env:
         EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         OUTPUT_FILE: ${{ inputs.output-file }}
       run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output // empty' "$EXECUTION_FILE" > "$OUTPUT_FILE"
-
-    # Codex drops sudo irreversibly and refuses to run again in the same job, so a job
-    # can use this action only once.
-    - name: Run Codex
-      if: inputs.harness == 'codex'
-      uses: openai/codex-action@306c6a196a99dcc6582530c396a19d2672d5e9ec # v1.14
-      with:
-        openai-api-key: ${{ inputs.openai-api-key }}
-        prompt: ${{ inputs.prompt }}
-        output-schema-file: ${{ inputs.schema-file }}
-        output-file: ${{ inputs.output-file }}
-        model: ${{ inputs.model }}
-        codex-version: 0.166.0
-        sandbox: read-only
-        safety-strategy: drop-sudo

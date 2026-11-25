@@ -1,16 +1,17 @@
 import {
-  policyFromEnv,
+  errorMessage,
   requireEnv,
   requirePositiveInteger,
   requireSha,
-  runInfoFromEnv,
   runMain,
   warning,
 } from "../src/actions.ts";
-import { evaluate, type PullState, reviewEvent, supersededReviews } from "../src/decide.ts";
-import { type AnchoredFindings, anchorFindings } from "../src/diff.ts";
-import { comparisonFileLimit, GitHubClient, GitHubError } from "../src/github.ts";
-import { findingComment, progressBody, reviewBody, type RunInfo } from "../src/messages.ts";
+import { fetchReviewMaterial } from "../src/coverage.ts";
+import type { PullState } from "../src/decide.ts";
+import { GitHubClient, isAnchoringError } from "../src/github.ts";
+import { policyFromEnv, runInfoFromEnv } from "../src/inputs.ts";
+import { progressBody, type RunInfo } from "../src/messages.ts";
+import { planReview } from "../src/plan.ts";
 import { botLogin, type RepoPolicy, reviewLabel } from "../src/policy.ts";
 import { parseReviewResult, type ReviewResult } from "../src/result.ts";
 
@@ -26,97 +27,72 @@ async function readResult(): Promise<ReviewResult> {
   return parsed.value;
 }
 
-/** A 422 caused by an inline comment's position, rather than the body or the commit. */
-function isAnchoringError(error: unknown): boolean {
-  return error instanceof GitHubError && error.status === 422 &&
-    /pull_request_review_thread|\bline\b|\bpath\b|\bposition\b/i.test(error.detail);
-}
-
 interface Context {
   readonly policy: RepoPolicy;
   readonly number: number;
   readonly baseSha: string;
   readonly run: RunInfo;
-  readonly reader: GitHubClient;
-  readonly writer: GitHubClient;
+  readonly github: GitHubClient;
+  readonly bot: GitHubClient;
 }
 
 /** Posts the review and returns the status for the progress comment. */
-async function publish({ policy, number, baseSha, run, reader, writer }: Context) {
+async function publish({ policy, number, baseSha, run, github, bot }: Context) {
   if (requireEnv("REVIEW_JOB_RESULT") !== "success") {
     return "The review failed before producing a result. See the run for details.";
   }
   const result = await readResult();
 
-  const [pull, comparison, earlierReviews] = await Promise.all([
-    reader.pull(number),
-    reader.compare(baseSha, run.headSha),
-    reader.reviews(number),
+  const [pull, material, earlierReviews] = await Promise.all([
+    github.pull(number),
+    fetchReviewMaterial(
+      github,
+      baseSha,
+      run.headSha,
+      (error) => warning(`Could not fetch the diff: ${errorMessage(error)}`),
+    ),
+    github.reviews(number),
   ]);
   if (pull.state !== "open") {
     return "The PR was closed before the review finished, so nothing was posted.";
   }
 
-  const files = comparison.files ?? [];
   const state: PullState = {
     headSha: pull.head.sha,
-    authorRole: await reader.role(pull.user.login),
-    files: files.map((file) => ({
+    authorRole: await github.role(pull.user.login),
+    files: material.files.map((file) => ({
       path: file.filename,
       previousPath: file.previous_filename,
       changes: file.changes,
     })),
-    filesTruncated: files.length >= comparisonFileLimit,
+    coverageGaps: material.gaps,
   };
-  const verdict = evaluate(result, run.headSha, state, policy);
-  const event = reviewEvent(verdict, policy.allowApprove);
-
-  const patches = new Map<string, string>();
-  for (const file of files) {
-    if (file.patch !== undefined) patches.set(file.filename, file.patch);
-  }
-  const notes: string[] = [];
-  const headMoved = pull.head.sha !== run.headSha;
-  if (headMoved) notes.push("Newer commits exist; this review doesn't cover them.");
-
-  const submit = ({ inline, unanchored }: AnchoredFindings) =>
-    writer.createReview(number, {
-      // GitHub rejects a commit a force-push removed, and line comments on a stale head.
-      commit_id: headMoved ? undefined : run.headSha,
-      event,
-      body: reviewBody({ run, result, verdict, event, unanchored, notes }),
-      comments: inline.map((finding) => ({
-        path: finding.path,
-        line: finding.line,
-        side: finding.side,
-        body: findingComment(finding),
-      })),
-    });
-  const inBody: AnchoredFindings = { inline: [], unanchored: result.findings };
-  const anchored = headMoved ? inBody : anchorFindings(result.findings, patches);
-  const review = await submit(anchored).catch((error) => {
-    if (!(anchored.inline.length && isAnchoringError(error))) throw error;
-    warning(
-      `GitHub rejected the inline comments; posting them in the review body: ${error.message}`,
-    );
-    return submit(inBody);
+  const patches = new Map(
+    material.files.flatMap((file) =>
+      file.patch === undefined ? [] : [[file.filename, file.patch] as const]
+    ),
+  );
+  const plan = planReview({
+    result,
+    run,
+    policy,
+    pull: state,
+    patches,
+    earlier: earlierReviews.filter((review) => review.user?.login === botLogin),
   });
 
-  const superseded = supersededReviews(
-    earlierReviews.filter((earlier) => earlier.user?.login === botLogin),
-    {
-      result,
-      verdict,
-      event,
-      reviewedHeadSha: run.headSha,
-      pull: state,
-    },
-  );
-  for (const id of superseded) {
+  const review = await bot.createReview(number, plan.review).catch((error) => {
+    if (!(plan.fallback && isAnchoringError(error))) throw error;
+    warning(
+      `GitHub rejected the inline comments; posting them in the body: ${errorMessage(error)}`,
+    );
+    return bot.createReview(number, plan.fallback);
+  });
+  for (const id of plan.dismiss) {
     try {
-      await writer.dismissReview(number, id, `Superseded by a later review of ${run.headSha}.`);
+      await bot.dismissReview(number, id, `Superseded by a later review of ${run.headSha}.`);
     } catch (error) {
-      warning(`Could not dismiss review ${id}: ${error instanceof Error ? error.message : error}`);
+      warning(`Could not dismiss review ${id}: ${errorMessage(error)}`);
     }
   }
   return `Review posted: ${review.html_url}`;
@@ -128,12 +104,12 @@ await runMain(async () => {
   const commentId = requirePositiveInteger("COMMENT_ID");
   const run = runInfoFromEnv();
   // Reads use the job's read-only token; only writes use the bot.
-  const reader = new GitHubClient(requireEnv("READ_TOKEN"), repository);
-  const writer = new GitHubClient(requireEnv("WRITE_TOKEN"), repository);
+  const github = new GitHubClient(requireEnv("READ_TOKEN"), repository);
+  const bot = new GitHubClient(requireEnv("WRITE_TOKEN"), repository);
 
   const finish = async (status: string) => {
-    await writer.updateComment(commentId, progressBody(run, status));
-    await writer.removeLabel(number, reviewLabel);
+    await bot.updateComment(commentId, progressBody(run, status));
+    await bot.removeLabel(number, reviewLabel);
   };
 
   let status: string;
@@ -143,12 +119,12 @@ await runMain(async () => {
       number,
       baseSha: requireSha("BASE_SHA"),
       run,
-      reader,
-      writer,
+      github,
+      bot,
     });
   } catch (error) {
     await finish("The review couldn't be posted. See the run for details.").catch((cleanup) =>
-      warning(`Could not update the progress comment: ${cleanup}`)
+      warning(`Could not update the progress comment: ${errorMessage(cleanup)}`)
     );
     throw error;
   }

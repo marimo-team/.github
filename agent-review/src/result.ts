@@ -1,8 +1,11 @@
 import { severities, type Severity } from "./policy.ts";
 import { type JsonObject, type Parsed, parseJsonObject, Reader } from "./reader.ts";
 
-export type DiffSide = "LEFT" | "RIGHT";
-export type ReviewOutcome = "completed" | "incomplete";
+export const diffSides = ["LEFT", "RIGHT"] as const;
+export type DiffSide = (typeof diffSides)[number];
+
+export const reviewOutcomes = ["completed", "incomplete"] as const;
+export type ReviewOutcome = (typeof reviewOutcomes)[number];
 
 export interface Finding {
   readonly path: string;
@@ -23,7 +26,7 @@ export interface ReviewResult {
 
 const maxPathLength = 500;
 
-export function isRelativeRepositoryPath(path: string): boolean {
+function isRelativeRepositoryPath(path: string): boolean {
   return (
     path.length > 0 &&
     path.length <= maxPathLength &&
@@ -34,7 +37,7 @@ export function isRelativeRepositoryPath(path: string): boolean {
   );
 }
 
-// Strict-mode schemas can't state these, so the parser truncates to them.
+// The schema can't state these, so the parser enforces them.
 const limits = {
   findings: 30,
   /** More than this many is malformed, not merely verbose. */
@@ -45,10 +48,7 @@ const limits = {
   text: 8_000,
 } as const;
 
-/**
- * Kept within the subset both harnesses accept: OpenAI strict mode requires every
- * property to be required and forbids extra keywords, so bounds live in the parser.
- */
+/** Bounds live in the parser, which doesn't trust the agent to follow the schema. */
 export const reviewResultSchema = {
   type: "object",
   additionalProperties: false,
@@ -56,7 +56,7 @@ export const reviewResultSchema = {
   properties: {
     outcome: {
       type: "string",
-      enum: ["completed", "incomplete"],
+      enum: reviewOutcomes,
       description: "incomplete when gaps prevented a meaningful review",
     },
     summary: { type: "string", description: "What the PR does and the overall assessment" },
@@ -77,10 +77,10 @@ export const reviewResultSchema = {
           line: { type: "integer", description: "Line number on the given side of the diff" },
           side: {
             type: "string",
-            enum: ["LEFT", "RIGHT"],
+            enum: diffSides,
             description: "RIGHT for added or context lines, LEFT for removed lines",
           },
-          severity: { type: "string", enum: [...severities] },
+          severity: { type: "string", enum: severities },
           title: { type: "string" },
           body: { type: "string", description: "Trigger, impact, and evidence" },
         },
@@ -89,15 +89,33 @@ export const reviewResultSchema = {
   },
 } as const;
 
-function readFinding(reader: Reader, value: JsonObject, at: string): Finding {
-  const path = reader.string(value, "path", maxPathLength, at).replace(/^(?:\.\/)+/, "");
+/**
+ * Agents read the PR head under `headDir`, often by absolute path, so their paths can
+ * carry the workspace and that directory as prefixes.
+ */
+export function headPathNormalizer(workspace: string, headDir: string): (path: string) => string {
+  const prefixes = [`${workspace}/${headDir}/`, `${workspace}/`, `${headDir}/`];
+  return (path) => {
+    const relative = path.replace(/^(?:\.\/)+/, "");
+    const prefix = prefixes.find((candidate) => relative.startsWith(candidate));
+    return prefix ? relative.slice(prefix.length) : relative;
+  };
+}
+
+function readFinding(
+  reader: Reader,
+  value: JsonObject,
+  at: string,
+  normalizePath: (path: string) => string,
+): Finding {
+  const path = normalizePath(reader.string(value, "path", Infinity, at));
   if (path && !isRelativeRepositoryPath(path)) {
     reader.errors.push(`${at}.path must be a relative repository path`);
   }
   return {
     path,
     line: reader.integer(value, "line", 1, at),
-    side: reader.oneOf(value, "side", ["LEFT", "RIGHT"], at),
+    side: reader.oneOf(value, "side", diffSides, at),
     severity: reader.oneOf(value, "severity", severities, at),
     title: reader.string(value, "title", limits.title, at),
     body: reader.string(value, "body", limits.body, at),
@@ -117,51 +135,43 @@ function mostSevere(findings: readonly Finding[], count: number): Finding[] {
   return findings.filter((_, index) => kept.has(index));
 }
 
-/** Agents read the PR head under `headDir`, so their paths can carry that prefix. */
-export function withoutHeadDir(result: ReviewResult, headDir: string): ReviewResult {
-  const prefix = `${headDir}/`;
-  return {
-    ...result,
-    findings: result.findings.map((finding) =>
-      finding.path.startsWith(prefix)
-        ? { ...finding, path: finding.path.slice(prefix.length) }
-        : finding
-    ),
-  };
-}
-
-export function parseReviewResult(raw: string): Parsed<ReviewResult> {
+/**
+ * Validates and trims the agent's output. Parsing its own output again gives the same
+ * result, so a later job can re-validate what an earlier one wrote.
+ */
+export function parseReviewResult(
+  raw: string,
+  normalizePath: (path: string) => string = (path) => path,
+): Parsed<ReviewResult> {
   const parsed = parseJsonObject(raw);
   if (!parsed.ok) return parsed;
   const value = parsed.value;
 
   const reader = new Reader();
-  const limitations = reader.array(value, "limitations", Infinity, "result").slice(
-    0,
-    limits.limitations,
-  ).flatMap(
-    (item, index) => {
-      if (typeof item === "string" && item.trim() !== "") return [item.slice(0, limits.text)];
-      reader.errors.push(`result.limitations[${index}] must be a non-empty string`);
-      return [];
-    },
-  );
   const parsedFindings = reader.array(value, "findings", limits.findingsParsed, "result").flatMap(
     (item, index) => {
       const at = `result.findings[${index}]`;
       const object = reader.object(item, at);
-      return object ? [readFinding(reader, object, at)] : [];
+      return object ? [readFinding(reader, object, at, normalizePath)] : [];
     },
   );
   const findings = mostSevere(parsedFindings, limits.findings);
   const omitted = parsedFindings.length - findings.length;
-  if (omitted) limitations.push(`${omitted} lower-severity findings were omitted.`);
+  const omittedNote = omitted ? [`${omitted} lower-severity findings were omitted.`] : [];
+
+  const limitations = reader.array(value, "limitations", Infinity, "result")
+    .flatMap((item, index) => {
+      if (typeof item === "string" && item.trim() !== "") return [item.slice(0, limits.text)];
+      reader.errors.push(`result.limitations[${index}] must be a non-empty string`);
+      return [];
+    })
+    .slice(0, limits.limitations - omittedNote.length);
 
   return reader.finish({
-    outcome: reader.oneOf(value, "outcome", ["completed", "incomplete"], "result"),
+    outcome: reader.oneOf(value, "outcome", reviewOutcomes, "result"),
     summary: reader.string(value, "summary", limits.text, "result"),
     coverage: reader.string(value, "coverage", limits.text, "result"),
-    limitations,
+    limitations: [...limitations, ...omittedNote],
     findings,
   });
 }

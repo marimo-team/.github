@@ -1,23 +1,13 @@
-export const harnesses = ["claude", "codex"] as const;
-export type Harness = (typeof harnesses)[number];
-
 export const severities = ["low", "medium", "high", "critical"] as const;
 export type Severity = (typeof severities)[number];
 
 export const repositoryRoles = ["none", "read", "triage", "write", "maintain", "admin"] as const;
 export type RepositoryRole = (typeof repositoryRoles)[number];
 
-/** Harness and model are one value so overriding the harness can't keep the other's model. */
-export interface Reviewer {
-  readonly harness: Harness;
-  /** Omit to use the harness default. */
-  readonly model?: string;
-}
-
 export interface RepoPolicy {
   /** Without it, the bot only requests changes or comments. */
   readonly allowApprove: boolean;
-  readonly reviewer: Reviewer;
+  readonly model: string;
   /** Findings at or above this severity request changes. */
   readonly blockAtSeverity: Severity;
   /** Globs; a PR touching any of them always needs a human approval. */
@@ -30,24 +20,26 @@ export const reviewLabel = "agent-review";
 export const botLogin = "marimo-oss-bot[bot]";
 export const minimumRequesterRole: RepositoryRole = "write";
 
-const defaultModels: Readonly<Record<Harness, string | undefined>> = {
-  claude: "claude-opus-5-5",
-  codex: undefined,
-};
+const defaultModel = "claude-opus-5-5";
 
 /** Paths every repository needs a human to approve; a repository can add to these. */
 const alwaysNeedsHuman = [
-  // Workflows, repository review guidance, and agent instructions.
+  // Workflows, repository review guidance, and agent and editor configuration.
   ".github/**",
   "REVIEW.md",
   "**/AGENTS.md",
   "**/CLAUDE.md",
-  ".claude/**",
-  ".codex/**",
+  "**/.claude/**",
+  "**/.codex/**",
+  "**/.mcp.json",
+  ".vscode/**",
+  ".devcontainer/**",
   // Who must review, which code is vendored, and what runs on contributors' machines.
   "**/CODEOWNERS",
   ".gitmodules",
+  ".gitattributes",
   ".pre-commit-config.yaml",
+  ".husky/**",
   // Dependency changes are supply-chain decisions.
   "**/package.json",
   "**/pnpm-lock.yaml",
@@ -62,7 +54,6 @@ const alwaysNeedsHuman = [
  */
 export interface PolicyInputs {
   readonly allowApprove: string;
-  readonly harness: string;
   readonly model: string;
   readonly blockAtSeverity: string;
   readonly neverAutoApprove: string;
@@ -75,8 +66,14 @@ function oneOf<T extends string>(name: string, value: string, options: readonly 
   return match;
 }
 
+/** The model is passed in Claude's command-line arguments, so it can't carry other flags. */
+function parseModel(input: string): string {
+  const model = input.trim() || defaultModel;
+  if (!/^[\w.:@/-]+$/.test(model)) throw new Error(`model has unexpected characters: "${model}"`);
+  return model;
+}
+
 export function parsePolicy(inputs: PolicyInputs): RepoPolicy {
-  const harness = oneOf("harness", inputs.harness, harnesses);
   const maxChangedLines = Number(inputs.maxChangedLines);
   if (!Number.isInteger(maxChangedLines) || maxChangedLines < 1) {
     throw new Error(
@@ -86,7 +83,7 @@ export function parsePolicy(inputs: PolicyInputs): RepoPolicy {
   const extraPaths = inputs.neverAutoApprove.split("\n").map((line) => line.trim()).filter(Boolean);
   return {
     allowApprove: oneOf("allow-approve", inputs.allowApprove, ["true", "false"]) === "true",
-    reviewer: { harness, model: inputs.model.trim() || defaultModels[harness] },
+    model: parseModel(inputs.model),
     blockAtSeverity: oneOf("block-at-severity", inputs.blockAtSeverity, severities),
     neverAutoApprove: [...alwaysNeedsHuman, ...extraPaths],
     maxChangedLines,

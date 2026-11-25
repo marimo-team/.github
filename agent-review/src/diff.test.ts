@@ -1,4 +1,4 @@
-import { deepEqual as assertEquals } from "node:assert/strict";
+import { deepEqual } from "node:assert/strict";
 import { anchorFindings, commentableLines } from "./diff.ts";
 import type { Finding } from "./result.ts";
 
@@ -16,8 +16,8 @@ const patch = [
 
 Deno.test("maps hunks to commentable lines on each side", () => {
   const lines = commentableLines(patch);
-  assertEquals([...lines.LEFT], [10, 11, 40]);
-  assertEquals([...lines.RIGHT], [10, 11, 12, 41]);
+  deepEqual([...lines.LEFT], [10, 11, 40]);
+  deepEqual([...lines.RIGHT], [10, 11, 12, 41]);
 });
 
 Deno.test("moves findings outside the diff into the body", () => {
@@ -38,6 +38,10 @@ Deno.test("moves findings outside the diff into the body", () => {
     ],
     new Map([["a.py", patch]]),
   );
-  assertEquals(inline.map((finding) => finding.line), [12]);
-  assertEquals(unanchored.length, 3);
+  deepEqual(inline.map((finding) => finding.line), [12]);
+  deepEqual(unanchored.map((finding) => [finding.path, finding.side, finding.line]), [
+    ["a.py", "RIGHT", 13],
+    ["a.py", "LEFT", 12],
+    ["b.py", "RIGHT", 1],
+  ]);
 });

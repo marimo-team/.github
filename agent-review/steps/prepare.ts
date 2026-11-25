@@ -1,5 +1,5 @@
 import {
-  policyFromEnv,
+  errorMessage,
   requireEnv,
   requirePositiveInteger,
   requireSha,
@@ -7,13 +7,12 @@ import {
   setOutput,
   warning,
 } from "../src/actions.ts";
-import { comparisonFileLimit, GitHubClient } from "../src/github.ts";
-import { claudeArgs } from "../src/harness.ts";
+import { fetchReviewMaterial } from "../src/coverage.ts";
+import { GitHubClient } from "../src/github.ts";
+import { policyFromEnv } from "../src/inputs.ts";
 import { botLogin } from "../src/policy.ts";
 import { renderPrompt } from "../src/prompt.ts";
 import { reviewResultSchema } from "../src/result.ts";
-
-const maxDiffBytes = 1_500_000;
 
 async function readOptional(path: string): Promise<string | undefined> {
   try {
@@ -29,39 +28,25 @@ function readTemplate(name: string): Promise<string> {
 }
 
 await runMain(async () => {
-  const { harness, model } = policyFromEnv().reviewer;
   const repository = requireEnv("REPOSITORY");
   const number = requirePositiveInteger("PR_NUMBER");
   const baseSha = requireSha("BASE_SHA");
   const headSha = requireSha("HEAD_SHA");
   const workspace = requireEnv("GITHUB_WORKSPACE");
   const headDir = requireEnv("HEAD_DIR");
-  const workDir = requireEnv("WORK_DIR");
-  const contextDir = `${workDir}/context`;
+  const contextDir = `${requireEnv("WORK_DIR")}/context`;
   const github = new GitHubClient(requireEnv("GITHUB_TOKEN"), repository);
 
-  const [pull, comparison, earlierComments] = await Promise.all([
+  const [pull, material, earlierComments] = await Promise.all([
     github.pull(number),
-    github.compare(baseSha, headSha),
+    fetchReviewMaterial(
+      github,
+      baseSha,
+      headSha,
+      (error) => warning(`Could not fetch the diff: ${errorMessage(error)}`),
+    ),
     github.reviewComments(number),
   ]);
-  const files = comparison.files ?? [];
-  const limitations: string[] = [];
-  if (files.length >= comparisonFileLimit) {
-    limitations.push(`Only the first ${comparisonFileLimit} changed files are listed.`);
-  }
-
-  let diff = "";
-  try {
-    diff = await github.compareDiff(baseSha, headSha);
-  } catch (error) {
-    warning(`Could not fetch the diff: ${error instanceof Error ? error.message : error}`);
-    limitations.push("The full diff was unavailable; use the per-file patch summaries instead.");
-  }
-  if (diff.length > maxDiffBytes) {
-    diff = diff.slice(0, maxDiffBytes);
-    limitations.push("changes.diff was truncated; read the remaining files in the PR head.");
-  }
 
   await Deno.mkdir(`${workspace}/${contextDir}`, { recursive: true });
   await Deno.writeTextFile(
@@ -75,22 +60,22 @@ await runMain(async () => {
         author: pull.user.login,
         baseSha,
         headSha,
-        mergeBaseSha: comparison.merge_base_commit.sha,
-        files: files.map((file) => ({
+        mergeBaseSha: material.comparison.merge_base_commit.sha,
+        files: material.files.map((file) => ({
           path: file.filename,
           previousPath: file.previous_filename,
           status: file.status,
           additions: file.additions,
           deletions: file.deletions,
-          patch: diff ? undefined : file.patch,
+          patch: material.diff ? undefined : file.patch,
         })),
-        limitations,
+        gaps: material.gaps,
       },
       null,
       2,
     ),
   );
-  await Deno.writeTextFile(`${workspace}/${contextDir}/changes.diff`, diff);
+  await Deno.writeTextFile(`${workspace}/${contextDir}/changes.diff`, material.diff);
   await Deno.writeTextFile(
     `${workspace}/${contextDir}/previous-findings.json`,
     JSON.stringify(
@@ -101,16 +86,15 @@ await runMain(async () => {
       2,
     ),
   );
-  const schema = reviewResultSchema;
+  await Deno.writeTextFile(
+    `${workspace}/${requireEnv("SCHEMA_FILE")}`,
+    JSON.stringify(reviewResultSchema),
+  );
   const prompt = renderPrompt(
     [await readTemplate("review.md"), await readTemplate("shared.md")],
     { repository, number, headSha, headDir, contextDir },
     await readOptional(`${workspace}/REVIEW.md`),
   );
-  await Deno.writeTextFile(`${workspace}/${workDir}/prompt.md`, prompt);
-  await Deno.writeTextFile(`${workspace}/${workDir}/schema.json`, JSON.stringify(schema));
   await setOutput("prompt", prompt);
-  await setOutput("harness", harness);
-  await setOutput("model", model ?? "");
-  await setOutput("claude-args", claudeArgs(model, schema));
+  await setOutput("model", policyFromEnv().model);
 });

@@ -1,7 +1,8 @@
 ## Context
 
 - The workspace root is the trusted base branch. `{{headDir}}/` is the PR head at `{{headSha}}`.
-- `{{contextDir}}/` has the PR's metadata in `pull-request.json` and its diff in `changes.diff`.
+- `{{contextDir}}/` has the PR's metadata in `pull-request.json` and its diff in `changes.diff`. Its
+  `gaps` lists parts of the change the diff leaves out; read those files in `{{headDir}}/`.
 - Follow the base branch's `AGENTS.md` and `CLAUDE.md` files at the root and in the changed files'
   directories, including files they reference with `@path`.
 

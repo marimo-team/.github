@@ -1,13 +1,27 @@
-import { deepEqual as assertEquals } from "node:assert/strict";
-import { parseReviewResult, withoutHeadDir } from "./result.ts";
+import { deepEqual, ok } from "node:assert/strict";
+import { headPathNormalizer, parseReviewResult, reviewResultSchema } from "./result.ts";
 
+const finding = {
+  path: "src/a.py",
+  line: 3,
+  side: "RIGHT",
+  severity: "high",
+  title: "t",
+  body: "b",
+};
 const valid = {
   outcome: "completed",
   summary: "s",
   coverage: "c",
   limitations: [],
-  findings: [{ path: "src/a.py", line: 3, side: "RIGHT", severity: "high", title: "t", body: "b" }],
+  findings: [finding],
 };
+
+function parse(value: unknown) {
+  const parsed = parseReviewResult(JSON.stringify(value));
+  if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+  return parsed.value;
+}
 
 function errorsFor(value: unknown): readonly string[] {
   const parsed = parseReviewResult(JSON.stringify(value));
@@ -15,41 +29,74 @@ function errorsFor(value: unknown): readonly string[] {
 }
 
 Deno.test("parses a valid result", () => {
-  const parsed = parseReviewResult(JSON.stringify(valid));
-  assertEquals(parsed.ok && parsed.value.findings[0]?.severity, "high");
+  deepEqual(parse(valid).findings, [finding]);
 });
 
-Deno.test("rejects malformed output", () => {
-  assertEquals(parseReviewResult("not json").ok, false);
-  assertEquals(errorsFor([]).length, 1);
-  assertEquals(errorsFor({ ...valid, outcome: "done" }).length, 1);
-  assertEquals(errorsFor({ ...valid, summary: " " }).length, 1);
-  assertEquals(errorsFor({ ...valid, findings: [{ ...valid.findings[0], line: "3" }] }).length, 1);
+Deno.test("rejects malformed output with errors that say where", () => {
+  deepEqual(parseReviewResult("not json").ok, false);
+  deepEqual(errorsFor([]), ["output must be a JSON object"]);
+  deepEqual(errorsFor({ ...valid, outcome: "done" }), [
+    "result.outcome must be one of completed, incomplete",
+  ]);
+  deepEqual(errorsFor({ ...valid, summary: " " }), ["result.summary must be a non-empty string"]);
+  deepEqual(errorsFor({ ...valid, findings: [{ ...finding, line: "3" }] }), [
+    "result.findings[0].line must be an integer of at least 1",
+  ]);
+  deepEqual(errorsFor({ ...valid, findings: [7] }), ["result.findings[0] must be an object"]);
+  deepEqual(errorsFor({ ...valid, limitations: [1] }), [
+    "result.limitations[0] must be a non-empty string",
+  ]);
+  deepEqual(errorsFor({ ...valid, findings: Array(501).fill(finding) }), [
+    "result.findings has more than 500 items",
+  ]);
 });
 
-Deno.test("trims verbose output instead of rejecting it", () => {
-  const low = { ...valid.findings[0], severity: "low" };
-  const findings = [...Array(30).fill(low), valid.findings[0], { ...low, title: "x".repeat(500) }];
-  const parsed = parseReviewResult(JSON.stringify({ ...valid, findings }));
-  if (!parsed.ok) throw new Error(parsed.errors.join("; "));
-  const kept = parsed.value.findings;
-  assertEquals(kept.length, 30);
-  assertEquals(kept.filter((finding) => finding.severity === "high").length, 1);
-  assertEquals(parsed.value.limitations, ["2 lower-severity findings were omitted."]);
+Deno.test("keeps the most severe findings in their original order and truncates titles", () => {
+  const low = { ...finding, severity: "low" };
+  const findings = [
+    { ...low, line: 1 },
+    { ...finding, line: 2 },
+    ...Array(29).fill(low).map((item, index) => ({ ...item, line: index + 10 })),
+    { ...finding, line: 3, title: "x".repeat(500) },
+  ];
+  const result = parse({ ...valid, findings });
+  deepEqual(result.findings.length, 30);
+  deepEqual(result.findings.slice(0, 3).map((item) => item.line), [1, 2, 10]);
+  deepEqual(result.findings.at(-1)?.title, `${"x".repeat(199)}…`);
+  deepEqual(result.limitations, ["2 lower-severity findings were omitted."]);
+});
+
+Deno.test("parsing its own output again keeps the omitted-findings note", () => {
+  const limitations = Array.from({ length: 30 }, (_, index) => `limitation ${index}`);
+  const once = parse({ ...valid, limitations, findings: Array(31).fill(finding) });
+  const twice = parse(once);
+  deepEqual(twice, once);
+  deepEqual(twice.limitations.at(-1), "1 lower-severity findings were omitted.");
+  deepEqual(twice.limitations.length, 30);
 });
 
 Deno.test("normalizes paths agents write relative to where they read", () => {
-  const finding = { ...valid.findings[0], path: "./pr-head/src/a.py" };
-  const parsed = parseReviewResult(JSON.stringify({ ...valid, findings: [finding] }));
-  if (!parsed.ok) throw new Error(parsed.errors.join("; "));
-  assertEquals(withoutHeadDir(parsed.value, "pr-head").findings[0]?.path, "src/a.py");
+  const normalize = headPathNormalizer("/home/runner/work/r/r", "pr-head");
+  for (
+    const path of ["./pr-head/src/a.py", "/home/runner/work/r/r/pr-head/src/a.py", "src/a.py"]
+  ) {
+    const parsed = parseReviewResult(
+      JSON.stringify({ ...valid, findings: [{ ...finding, path }] }),
+      normalize,
+    );
+    deepEqual(parsed.ok && parsed.value.findings[0]?.path, "src/a.py", path);
+  }
 });
 
 Deno.test("rejects findings that point outside the repository", () => {
-  for (const path of ["/etc/passwd", "../x", "a/./b", "a//b", "a\\b", "a\u0000b"]) {
-    const finding = { ...valid.findings[0], path };
-    assertEquals(errorsFor({ ...valid, findings: [finding] }).length > 0, true, path);
+  for (
+    const path of ["/etc/passwd", "../x", "a/./b", "a//b", "a\\b", "a\u0000b", "a".repeat(501)]
+  ) {
+    ok(errorsFor({ ...valid, findings: [{ ...finding, path }] }).length > 0, path);
   }
-  const zeroLine = { ...valid.findings[0], line: 0 };
-  assertEquals(errorsFor({ ...valid, findings: [zeroLine] }).length, 1);
+  deepEqual(errorsFor({ ...valid, findings: [{ ...finding, line: 0 }] }).length, 1);
+});
+
+Deno.test("the schema fits in single-quoted Claude arguments", () => {
+  ok(!JSON.stringify(reviewResultSchema).includes("'"));
 });

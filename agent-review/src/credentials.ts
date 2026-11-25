@@ -11,9 +11,10 @@ const credentialPatterns: ReadonlyArray<readonly [string, RegExp]> = [
 ];
 
 /**
- * Names the kind of credential `text` contains, if any. Codex can run read-only shell
- * commands in a job whose environment holds Actions tokens, so a prompt-injected agent
- * could print one into a finding. This catches tokens printed verbatim, not encoded ones.
+ * Names the kind of credential `text` contains, if any. The agent reads untrusted
+ * content and its output is posted publicly, so a prompt-injected agent could copy a
+ * credential it can read into a finding. This catches tokens printed verbatim, not
+ * encoded ones.
  */
 export function findCredential(text: string): string | undefined {
   return credentialPatterns.find(([, pattern]) => pattern.test(text))?.[0];

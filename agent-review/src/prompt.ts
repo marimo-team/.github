@@ -1,10 +1,4 @@
-export interface PromptVariables {
-  readonly repository: string;
-  readonly number: number;
-  readonly headSha: string;
-  readonly headDir: string;
-  readonly contextDir: string;
-}
+export type PromptVariables = Readonly<Record<string, string | number>>;
 
 function reviewGuideSection(guide: string | undefined): string | undefined {
   // The file's own title would sit above this section's heading.
@@ -24,8 +18,9 @@ export function renderPrompt(
 ): string {
   const central = templates.map((template) =>
     template.trim().replace(/\{\{(\w+)\}\}/g, (match, name: string) => {
-      if (!(name in variables)) throw new Error(`Unknown prompt variable ${match}`);
-      return String(variables[name as keyof PromptVariables]);
+      const value = variables[name];
+      if (value === undefined) throw new Error(`Unknown prompt variable ${match}`);
+      return String(value);
     })
   );
   const guide = reviewGuideSection(reviewGuide);

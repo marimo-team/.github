@@ -3,19 +3,15 @@ on:
   workflow_call:
     inputs:
       policy-ref:
-        description: Commit SHA in marimo-team/.github containing the review code
+        description: Commit SHA on marimo-team/.github's main branch containing the review code
         required: true
         type: string
       allow-approve:
         description: Let the bot approve; otherwise it only requests changes or comments
         type: boolean
         default: false
-      harness:
-        description: claude or codex
-        type: string
-        default: claude
       model:
-        description: The harness's model; empty uses the default
+        description: The Claude model; empty uses the default
         type: string
         default: ""
       block-at-severity:
@@ -42,9 +38,12 @@ env:
   DOPPLER_BOT_CONFIG: ci_bot
   DOPPLER_BOT_IDENTITY: TODO-doppler-bot-identity-id
   BOT_CLIENT_ID: Iv23lisN9yMRNSc7wovY # marimo-oss-bot (App ID 3225607)
+  DENO_VERSION: v2.9.8
   WORK_DIR: _agent_review
   CENTRAL_DIR: _agent_review/central
   HEAD_DIR: pr-head
+  SCHEMA_FILE: _agent_review/schema.json
+  RESULT_FILE: _agent_review/result.json
   REPOSITORY: ${{ github.repository }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -52,7 +51,6 @@ env:
   REQUESTER: ${{ github.event.sender.login }}
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
   POLICY_ALLOW_APPROVE: ${{ inputs.allow-approve }}
-  POLICY_HARNESS: ${{ inputs.harness }}
   POLICY_MODEL: ${{ inputs.model }}
   POLICY_BLOCK_AT_SEVERITY: ${{ inputs.block-at-severity }}
   POLICY_NEVER_AUTO_APPROVE: ${{ inputs.never-auto-approve }}
@@ -96,35 +94,28 @@ jobs:
           persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.9.8
+          deno-version: ${{ env.DENO_VERSION }}
       - name: Authorize
-        id: authorize
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          POLICY_REF: ${{ inputs.policy-ref }}
         run: deno run --no-prompt --allow-net=api.github.com --allow-env steps/authorize.ts
-      - name: Fetch bot credentials
-        id: bot-secrets
-        uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
+      # The checkout above is policy-ref. `$/` would avoid the checkout, but actionlint
+      # doesn't support it yet (rhysd/actionlint#711). A local path can't use env.
+      - name: Mint bot token
+        id: bot
+        uses: ./_agent_review/central/agent-review/bot-token # zizmor: ignore[self-repository]
         with:
-          auth-method: oidc
-          doppler-identity-id: ${{ env.DOPPLER_BOT_IDENTITY }}
+          doppler-identity: ${{ env.DOPPLER_BOT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
           doppler-config: ${{ env.DOPPLER_BOT_CONFIG }}
-      - name: Mint bot token
-        id: bot-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
           client-id: ${{ env.BOT_CLIENT_ID }}
-          private-key: ${{ steps.bot-secrets.outputs.GITHUB_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-issues: write # the progress comment and reaction
       - name: Post progress comment
         id: progress
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:
-          GITHUB_TOKEN: ${{ steps.bot-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.bot.outputs.token }}
         run: deno run --no-prompt --allow-net=api.github.com --allow-env --allow-write="$GITHUB_OUTPUT" steps/start.ts
 
   review:
@@ -165,7 +156,7 @@ jobs:
           persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.9.8
+          deno-version: ${{ env.DENO_VERSION }}
       - name: Prepare review
         id: prepare
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
@@ -183,25 +174,22 @@ jobs:
           doppler-identity-id: ${{ env.DOPPLER_AGENT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
           doppler-config: ${{ env.DOPPLER_AGENT_CONFIG }}
-      # The checkout above is policy-ref. `$/` would avoid the checkout, but actionlint
-      # doesn't support it yet (rhysd/actionlint#711). A local path can't use env.
       - name: Review
         uses: ./_agent_review/central/agent-review/run-agent # zizmor: ignore[self-repository]
         with:
-          harness: ${{ steps.prepare.outputs.harness }}
           model: ${{ steps.prepare.outputs.model }}
           prompt: ${{ steps.prepare.outputs.prompt }}
-          claude-args: ${{ steps.prepare.outputs.claude-args }}
-          schema-file: ${{ env.WORK_DIR }}/schema.json
-          output-file: ${{ env.WORK_DIR }}/result.json
+          schema-file: ${{ env.SCHEMA_FILE }}
+          output-file: ${{ env.RESULT_FILE }}
           claude-code-oauth-token: ${{ steps.model-secrets.outputs.CLAUDE_CODE_OAUTH_TOKEN }}
-          openai-api-key: ${{ steps.model-secrets.outputs.OPENAI_API_KEY }}
           otlp-endpoint: ${{ steps.model-secrets.outputs.OTLP_ENDPOINT }}
           otlp-headers: ${{ steps.model-secrets.outputs.OTLP_HEADERS }}
+          telemetry-attributes: >-
+            service.name=agent-review,github.repository=${{ github.repository }},github.pr=${{ github.event.pull_request.number }},github.run_id=${{ github.run_id }},github.run_attempt=${{ github.run_attempt }}
       - name: Check result
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:
-          OUTPUT_PATH: ${{ github.workspace }}/${{ env.WORK_DIR }}/result.json
+          RESULT_PATH: ${{ github.workspace }}/${{ env.RESULT_FILE }}
         run: >-
           deno run --no-prompt --allow-env --allow-read="$GITHUB_WORKSPACE"
           --allow-write="$GITHUB_WORKSPACE/$WORK_DIR" steps/check-output.ts
@@ -209,7 +197,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent-review-result
-          path: ${{ env.WORK_DIR }}/result.json
+          path: ${{ env.RESULT_FILE }}
           if-no-files-found: error
           overwrite: true # a re-run attempt reuses the name
           retention-days: 7
@@ -238,36 +226,29 @@ jobs:
           persist-credentials: false
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.9.8
+          deno-version: ${{ env.DENO_VERSION }}
+      # A missing result, such as an expired artifact on a re-run, is reported by publish.
       - name: Download result
         if: needs.review.result == 'success'
+        continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: agent-review-result
           path: ${{ runner.temp }}/agent-review-result
-      - name: Fetch bot credentials
-        id: bot-secrets
-        uses: dopplerhq/secrets-fetch-action@cd2efbf9a404504316435873eff298b82f7e0562 # v1.3.0
+      - name: Mint bot token
+        id: bot
+        uses: ./_agent_review/central/agent-review/bot-token # zizmor: ignore[self-repository]
         with:
-          auth-method: oidc
-          doppler-identity-id: ${{ env.DOPPLER_BOT_IDENTITY }}
+          doppler-identity: ${{ env.DOPPLER_BOT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
           doppler-config: ${{ env.DOPPLER_BOT_CONFIG }}
-      - name: Mint bot token
-        id: bot-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
           client-id: ${{ env.BOT_CLIENT_ID }}
-          private-key: ${{ steps.bot-secrets.outputs.GITHUB_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-issues: write
-          permission-pull-requests: write
+          pull-requests: write
       - name: Publish review
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:
           READ_TOKEN: ${{ github.token }}
-          WRITE_TOKEN: ${{ steps.bot-token.outputs.token }}
+          WRITE_TOKEN: ${{ steps.bot.outputs.token }}
           REVIEW_JOB_RESULT: ${{ needs.review.result }}
           RESULT_PATH: ${{ runner.temp }}/agent-review-result/result.json
           COMMENT_ID: ${{ needs.start.outputs.comment-id }}

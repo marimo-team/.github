@@ -1,4 +1,4 @@
-import { deepEqual as assertEquals, throws as assertThrows } from "node:assert/strict";
+import { deepEqual, throws } from "node:assert/strict";
 import { renderPrompt } from "./prompt.ts";
 
 const variables = {
@@ -15,10 +15,10 @@ Deno.test("renders prompt variables and appends the review guide", () => {
     variables,
     "# Review instructions\n\nCheck the kernel.",
   );
-  assertEquals(
+  deepEqual(
     prompt,
     "Review #7.\n\nRead pr-head/.\n\n## Review instructions\n\nCheck the kernel.\n",
   );
-  assertEquals(renderPrompt(["x"], variables, "  \n"), "x\n");
-  assertThrows(() => renderPrompt(["{{missing}}"], variables, undefined));
+  deepEqual(renderPrompt(["x"], variables, "  \n"), "x\n");
+  throws(() => renderPrompt(["{{missing}}"], variables, undefined));
 });

@@ -1,4 +1,4 @@
-import { deepEqual as assertEquals } from "node:assert/strict";
+import { deepEqual } from "node:assert/strict";
 import { matchingGlob } from "./glob.ts";
 
 Deno.test("matches path globs", () => {
@@ -14,6 +14,6 @@ Deno.test("matches path globs", () => {
     ["file?.ts", "file1.ts", true],
   ];
   for (const [glob, path, expected] of cases) {
-    assertEquals(matchingGlob(path, [glob]) !== undefined, expected, `${glob} vs ${path}`);
+    deepEqual(matchingGlob(path, [glob]) !== undefined, expected, `${glob} vs ${path}`);
   }
 });

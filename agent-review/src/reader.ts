@@ -4,7 +4,7 @@ export type Parsed<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly errors: readonly string[] };
 
-export function isRecord(value: unknown): value is JsonObject {
+function isRecord(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

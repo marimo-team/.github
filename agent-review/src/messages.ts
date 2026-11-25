@@ -1,5 +1,3 @@
-import type { Verdict } from "./decide.ts";
-import type { ReviewEvent } from "./github.ts";
 import type { Finding, ReviewResult } from "./result.ts";
 import { codeSpan, sanitizeMarkdown } from "./sanitize.ts";
 
@@ -9,12 +7,6 @@ export interface RunInfo {
   readonly runUrl: string;
   readonly headSha: string;
 }
-
-const verdictNames: Record<Verdict["kind"], string> = {
-  approve: "Approve",
-  request_changes: "Request changes",
-  comment: "Comment",
-};
 
 function attribution(run: RunInfo): string {
   return `> 🤖 Automated review by ${run.model} via Claude Code, requested by \`${run.requester}\`.`;
@@ -29,20 +21,6 @@ function footer(run: RunInfo): string {
 
 export function progressBody(run: RunInfo, status: string): string {
   return `${attribution(run)}\n\n${status}\n\n${footer(run)}`;
-}
-
-function decisionSection(verdict: Verdict, event: ReviewEvent): string {
-  const approvalWithheld = verdict.kind === "approve" && event !== "APPROVE";
-  const heading = approvalWithheld
-    ? "**Proposed decision: Approve** (this repository doesn't allow the bot to approve)"
-    : `**Decision: ${verdictNames[verdict.kind]}**`;
-  // Reasons can quote changed file names, which the PR author controls.
-  const reasons = verdict.kind === "request_changes"
-    ? verdict.blocking.map((finding) => `${finding.severity}: ${finding.title}`)
-    : verdict.kind === "comment"
-    ? verdict.reasons
-    : [];
-  return [heading, ...reasons.map((reason) => `- ${sanitizeMarkdown(reason)}`)].join("\n");
 }
 
 function findingHeading(finding: Finding): string {
@@ -73,17 +51,11 @@ function coverageSection(result: ReviewResult): string {
 export function reviewBody(options: {
   readonly run: RunInfo;
   readonly result: ReviewResult;
-  readonly verdict: Verdict;
-  readonly event: ReviewEvent;
   readonly unanchored: readonly Finding[];
   readonly notes: readonly string[];
 }): string {
-  const { run, result, verdict, event, unanchored, notes } = options;
-  const sections = [
-    attribution(run),
-    decisionSection(verdict, event),
-    sanitizeMarkdown(result.summary),
-  ];
+  const { run, result, unanchored, notes } = options;
+  const sections = [attribution(run), sanitizeMarkdown(result.summary)];
   if (unanchored.length) {
     sections.push(`**Findings outside the diff**\n\n${unanchored.map(findingLine).join("\n\n")}`);
   }

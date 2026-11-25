@@ -6,26 +6,10 @@ on:
         description: Commit SHA on marimo-team/.github's main branch containing the review code
         required: true
         type: string
-      allow-approve:
-        description: Let the bot approve; otherwise it only requests changes or comments
-        type: boolean
-        default: false
       model:
         description: The Claude model; empty uses the default
         type: string
         default: ""
-      block-at-severity:
-        description: Findings at or above this severity request changes
-        type: string
-        default: high
-      never-auto-approve:
-        description: Globs, one per line, that always need a human approval, on top of the defaults
-        type: string
-        default: ""
-      max-changed-lines:
-        description: Larger PRs are never approved
-        type: number
-        default: 400
 
 permissions: {}
 
@@ -50,11 +34,7 @@ env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
   REQUESTER: ${{ github.event.sender.login }}
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-  POLICY_ALLOW_APPROVE: ${{ inputs.allow-approve }}
   POLICY_MODEL: ${{ inputs.model }}
-  POLICY_BLOCK_AT_SEVERITY: ${{ inputs.block-at-severity }}
-  POLICY_NEVER_AUTO_APPROVE: ${{ inputs.never-auto-approve }}
-  POLICY_MAX_CHANGED_LINES: ${{ inputs.max-changed-lines }}
 
 jobs:
   start:
@@ -174,18 +154,61 @@ jobs:
           doppler-identity-id: ${{ env.DOPPLER_AGENT_IDENTITY }}
           doppler-project: ${{ env.DOPPLER_PROJECT }}
           doppler-config: ${{ env.DOPPLER_AGENT_CONFIG }}
+      # `--tools` removes every built-in tool except reading. No allow rules are added:
+      # in `dontAsk` mode reads inside the workspace proceed and anything else, such as
+      # reading `/proc` for the action's environment, is denied instead of prompted.
+      # claude-code-action writes the job's token into the workspace's `.git/config`, so
+      # reads of `.git` are denied. `--strict-mcp-config` ignores the repository's MCP servers.
+      - name: Build Claude arguments
+        id: args
+        env:
+          MODEL: ${{ steps.prepare.outputs.model }}
+        run: |
+          schema=$(jq -c . "$SCHEMA_FILE")
+          # The action parses claude_args with shell-quote; the schema is single-quoted.
+          if [[ $schema == *"'"* ]]; then
+            echo "::error::The output schema can't contain single quotes"
+            exit 1
+          fi
+          args="--model $MODEL --tools Read,Grep,Glob --disallowedTools 'Read(**/.git/**)'"
+          args+=" --permission-mode dontAsk --strict-mcp-config --max-turns 100"
+          args+=" --json-schema '$schema'"
+          delimiter="EOF_$(openssl rand -hex 16)"
+          printf 'value<<%s\n%s\n%s\n' "$delimiter" "$args" "$delimiter" >> "$GITHUB_OUTPUT"
       - name: Review
-        uses: ./_agent_review/central/agent-review/run-agent # zizmor: ignore[self-repository]
-        with:
-          model: ${{ steps.prepare.outputs.model }}
-          prompt: ${{ steps.prepare.outputs.prompt }}
-          schema-file: ${{ env.SCHEMA_FILE }}
-          output-file: ${{ env.RESULT_FILE }}
-          claude-code-oauth-token: ${{ steps.model-secrets.outputs.CLAUDE_CODE_OAUTH_TOKEN }}
-          otlp-endpoint: ${{ steps.model-secrets.outputs.OTLP_ENDPOINT }}
-          otlp-headers: ${{ steps.model-secrets.outputs.OTLP_HEADERS }}
-          telemetry-attributes: >-
+        id: claude
+        uses: anthropics/claude-code-action@cc98b3ae241b0fcfb6a42a2690751afffecb4452 # v1.0.278
+        env:
+          # Nested CLAUDE.md files under the PR head would otherwise load as instructions.
+          CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1"
+          # The conversation goes to an OTLP backend rather than the public job log. Claude
+          # can't read its environment, so the headers' token stays out of the agent's reach.
+          CLAUDE_CODE_ENABLE_TELEMETRY: ${{ steps.model-secrets.outputs.OTLP_ENDPOINT != '' && '1' || '0' }}
+          CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1"
+          OTEL_LOGS_EXPORTER: otlp
+          OTEL_TRACES_EXPORTER: otlp
+          OTEL_METRICS_EXPORTER: otlp
+          OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ steps.model-secrets.outputs.OTLP_ENDPOINT }}
+          OTEL_EXPORTER_OTLP_HEADERS: ${{ steps.model-secrets.outputs.OTLP_HEADERS }}
+          OTEL_RESOURCE_ATTRIBUTES: >-
             service.name=agent-review,github.repository=${{ github.repository }},github.pr=${{ github.event.pull_request.number }},github.run_id=${{ github.run_id }},github.run_attempt=${{ github.run_attempt }}
+          OTEL_LOG_USER_PROMPTS: "1"
+          OTEL_LOG_ASSISTANT_RESPONSES: "1"
+          OTEL_LOG_TOOL_DETAILS: "1"
+          OTEL_LOG_TOOL_CONTENT: "1"
+        with:
+          claude_code_oauth_token: ${{ steps.model-secrets.outputs.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Without this the action exchanges the OIDC token for a Claude App token
+          # with write access.
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.prepare.outputs.prompt }}
+          claude_args: ${{ steps.args.outputs.value }}
+      # Read from the transcript file: an environment variable can't hold more than 128 KiB.
+      - name: Save output
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: jq -ce '[.[] | select(.type == "result")] | last | .structured_output // empty' "$EXECUTION_FILE" > "$RESULT_FILE"
       - name: Check result
         working-directory: ${{ env.CENTRAL_DIR }}/agent-review
         env:

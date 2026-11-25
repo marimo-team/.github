@@ -30,9 +30,5 @@ await runMain(async () => {
   const pull = await github.pull(number);
   if (pull.state !== "open") throw new Error(`PR #${number} is ${pull.state}`);
 
-  console.log(
-    `Reviewing ${repository}#${number} with ${policy.model}${
-      policy.allowApprove ? ", approval allowed" : ""
-    }`,
-  );
+  console.log(`Reviewing ${repository}#${number} with ${policy.model}`);
 });

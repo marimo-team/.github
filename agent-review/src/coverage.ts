@@ -17,10 +17,7 @@ function hasUnreviewableContent(file: ComparedFile): boolean {
   return file.patch === undefined && !pureRename;
 }
 
-/**
- * Parts of the change the reviewer can't read. Decisions recompute these from GitHub
- * rather than trusting the review, so padding a PR past what it can read is visible.
- */
+/** Parts of the change the diff leaves out, so the agent reads those files directly. */
 export function coverageGaps(
   files: readonly ComparedFile[],
   diffLength: number | undefined,

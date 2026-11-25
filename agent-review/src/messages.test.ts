@@ -16,16 +16,15 @@ const result: ReviewResult = {
   findings: [],
 };
 
-Deno.test("review body distinguishes proposed from enforced decisions", () => {
-  const options = { run, result, unanchored: [], notes: [] };
-  const verdict = { kind: "comment" as const, reasons: ["Changes `![x](https://evil.test)`."] };
-
-  const comment = reviewBody({ ...options, verdict, event: "COMMENT" });
-  match(comment, /\*\*Decision: Comment\*\*/);
-  doesNotMatch(comment, /!\[/);
-
-  const proposed = reviewBody({ ...options, verdict: { kind: "approve" }, event: "COMMENT" });
-  match(proposed, /\*\*Proposed decision: Approve\*\* \(this repository doesn't/);
+Deno.test("review body sanitizes the agent's text and says when nothing was found", () => {
+  const body = reviewBody({
+    run,
+    result: { ...result, summary: "See ![x](https://evil.test)" },
+    unanchored: [],
+    notes: [],
+  });
+  doesNotMatch(body, /!\[/);
+  match(body, /No findings within the coverage below/);
 });
 
 Deno.test("drops coverage before findings when the body is too long", () => {
@@ -41,8 +40,6 @@ Deno.test("drops coverage before findings when the body is too long", () => {
   const body = reviewBody({
     run,
     result: { ...result, coverage: long, limitations: Array(30).fill(long), findings: [finding] },
-    verdict: { kind: "comment", reasons: [] },
-    event: "COMMENT",
     unanchored: Array(30).fill(finding),
     notes: [],
   });
@@ -65,8 +62,6 @@ Deno.test("caps a body whose findings alone are too long, keeping the footer", (
   const body = reviewBody({
     run,
     result: { ...result, summary: "s".repeat(8_000), findings: [finding] },
-    verdict: { kind: "comment", reasons: [] },
-    event: "COMMENT",
     unanchored: Array(30).fill(finding),
     notes: [],
   });

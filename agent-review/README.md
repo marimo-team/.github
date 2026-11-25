@@ -1,7 +1,8 @@
 # Agent review
 
 A maintainer adds the `agent-review` label to a PR. Claude Code reviews it, and `marimo-oss-bot`
-posts the findings as a PR review. Repositories call the reusable workflow in
+posts the findings as a comment review. It doesn't approve or request changes yet; see
+[Approval later](#approval-later). Repositories call the reusable workflow in
 [`.github/workflows/agent-review.yml`](../.github/workflows/agent-review.yml).
 
 ## Trust boundaries
@@ -16,18 +17,17 @@ posts the findings as a PR review. Repositories call the reusable workflow in
   where claude-code-action writes the job's token. It has no shell, and the action removes the OIDC
   request token from its environment. No workflow step executes the PR head, which is checked out
   under `pr-head/`.
-- [`run-agent`](run-agent/action.yml) keeps everything about how the agent runs, so a sandboxed
-  runner can replace it without changing the jobs around it. A harness with a shell, such as Codex,
-  needs that first: anything that runs in the `review` job can read its OIDC request token.
+- Only the Claude steps of the `review` job depend on the harness. A harness with a shell, such as
+  Codex, needs a sandbox there first: anything that runs in the `review` job can read its OIDC
+  request token.
 - Instructions come from [`prompts/`](prompts) and the base branch's `REVIEW.md`, `AGENTS.md`, and
   `CLAUDE.md`, so the PR can't change them.
 - `start` and `publish` run in the `agent-bot` environment, the only one that can fetch the bot key.
   `review` runs in `agent`, the only one that can fetch model keys.
 - Output containing anything shaped like a credential is discarded before upload. It catches tokens
   printed verbatim, not encoded ones.
-- [`publish.ts`](steps/publish.ts) picks the review event from live PR state and the repository's
-  policy; the agent can't. It recomputes what the diff leaves out (truncation, binary files), so a
-  PR padded past what the agent can read is never approved and never lifts the bot's block.
+- [`publish.ts`](steps/publish.ts) builds the review from live PR state, not from what the agent
+  says about the PR.
 - `policy-ref` must be on this repository's `main`; a fork's commit is rejected.
 
 ## Observability
@@ -47,14 +47,24 @@ Give the token only write scopes. Find a review by `github.repository`, `github.
 `github.run_id`. The conversation text is in log events, not spans, and Claude's spans aren't nested
 under one trace, so read a review through its log events, ordered by `event.sequence`.
 
-## Policy
+## Approval later
 
-Repositories set policy as inputs in their caller workflow, which runs from the default branch. The
-bot requests changes for findings at or above `block-at-severity` and comments otherwise. With
-`allow-approve: true`, it also approves when [`decide.ts`](src/decide.ts) allows; it doesn't check
-CI, which branch protection covers. Turn on "dismiss stale approvals" first, so a push after the
-bot's approval needs a new one. [`policy.ts`](src/policy.ts) holds the shared defaults, including
-paths that always need a human.
+The bot only comments. Approving and requesting changes plug into [`plan.ts`](src/plan.ts), which
+already works from live PR state. Commit `3796dfd` implemented all of this, with tests:
+
+1. Caller inputs for the policy, parsed in [`policy.ts`](src/policy.ts): whether the bot may
+   approve, the severity that requests changes, extra paths that always need a human, and a size
+   limit.
+2. More live state in `PullState`: the author's role, the changed files, and `coverageGaps`
+   recomputed from GitHub, so a PR padded past what the agent can read is never approved.
+3. A pure function that picks the event. Approval needs a complete review of the current head, no
+   findings at medium or above, no protected paths, a PR within the size limit, and an author with
+   write access.
+4. Dismissing the bot's earlier approval when a later review doesn't approve, and its block only
+   after a complete review of the current head.
+
+Before turning approval on, turn on "dismiss stale approvals", and confirm that an app's approval
+counts toward the required reviews.
 
 ## Adding a repository
 
@@ -94,12 +104,7 @@ paths that always need a human.
        uses: marimo-team/.github/.github/workflows/agent-review.yml@<sha>
        with:
          policy-ref: <sha>
-         # Optional, with their defaults:
-         # allow-approve: false
-         # model: claude-opus-5-5
-         # block-at-severity: high
-         # max-changed-lines: 400
-         # never-auto-approve: "" # extra globs, one per line
+         # model: claude-opus-5-5 # optional; the default
    ```
 
 5. Optionally, add `REVIEW.md` at the repository root with review instructions.

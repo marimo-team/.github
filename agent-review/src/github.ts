@@ -43,14 +43,6 @@ export interface ReviewComment {
   readonly body: string;
 }
 
-export type ReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
-
-export interface PullReview {
-  readonly id: number;
-  readonly user: { readonly login: string } | null;
-  readonly state: ReviewState;
-}
-
 export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 
 export interface NewReviewComment {
@@ -167,19 +159,8 @@ export class GitHubClient {
     return this.paginate(`${this.repo}/pulls/${number}/comments`);
   }
 
-  reviews(number: number): Promise<PullReview[]> {
-    return this.paginate(`${this.repo}/pulls/${number}/reviews`);
-  }
-
   createReview(number: number, review: NewReview): Promise<{ id: number; html_url: string }> {
     return this.json("POST", `${this.repo}/pulls/${number}/reviews`, review);
-  }
-
-  dismissReview(number: number, reviewId: number, message: string): Promise<void> {
-    return this.noContent("PUT", `${this.repo}/pulls/${number}/reviews/${reviewId}/dismissals`, {
-      message,
-      event: "DISMISS",
-    });
   }
 
   createComment(number: number, body: string): Promise<{ id: number }> {
